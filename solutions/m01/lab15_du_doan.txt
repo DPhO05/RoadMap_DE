@@ -1,0 +1,16 @@
+staging.stg_olist_orders 99441
+staging.stg_olist_order_items 112650
+staging.stg_olist_order_payments 103886
+staging.stg_olist_order_reviews 99224
+staging.stg_olist_customers 99441
+staging.stg_olist_products 32951
+staging.stg_olist_sellers 3095
+staging.stg_olist_geolocation 738332
+staging.stg_olist_category_translation 71
+semantic.customer_identity 99441
+semantic.zip_geo 19010
+core.customers 96096
+core.sellers 3095
+core.products 32951
+core.orders 99441
+core.order_items 112650

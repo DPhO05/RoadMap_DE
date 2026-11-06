@@ -1,0 +1,228 @@
+% Trang khởi động M0 (2 giờ), bản 2.0 nháp: mục cuối của chương "Về lộ trình này".
+% Output chạy ngày 06/11/2026 từ thư mục có symlink lakehouse tới repo: uv 0.10.9, Python 3.10.20,
+% GNU Make 3.81, openrsync protocol 29, OpenJDK 11.0.30. Lúc kiểm, cache uv, TMPDIR, venv Airflow
+% và thư mục Ivy của Spark nằm trong thư mục nháp, nên repo lakehouse không bị ghi gì.
+\section{Bắt đầu từ nền SWE}
+
+Nếu bạn đã làm phần mềm vài năm, bạn không bắt đầu từ số 0. Git, review, test, CI, hạ tầng dạng code (IaC) và Docker Compose dùng gần như nguyên vẹn trong lộ trình này. Phần phải học lại là cách nghĩ về dữ liệu, và lỗi ở phần này thường im lặng: ở Module 3, một câu join quen tay cho tổng tiền cao hơn 26,9\% mà database không báo lỗi nào.
+% Kiểm: chạy lại khối A của M3 ngày 06/11/2026 bằng lakehouse/.venv/bin/python, DuckDB 1.5.6: 16008872.12 và 20308134.71, cao hơn 26.9%.
+
+Trang này là bản đồ, không phải bài học. Nó tính 2 giờ trong phần lõi: một giờ đọc ba mục đầu, một giờ làm danh sách kiểm trên repo \repo{lakehouse}. Lời giải thích cho từng chỗ khác nằm ở module được trỏ tới.
+
+\subsection{Thứ mang sang thẳng}
+
+Sáu thứ dưới đây bạn dùng như khi làm app. Cột cuối là chỗ dữ liệu làm chúng khác đi.
+\begin{xltabular}{\textwidth}{@{}P{2.6cm} L L@{}}
+\toprule
+\thd{bạn đã biết} & \thd{dùng ở đâu trong lộ trình} & \thd{chỗ khác cần để ý} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Git và pull request & code của lab, DAG, câu SQL và job Spark; capstone là một repo của bạn & Git giữ code, không giữ dữ liệu: CSV do \repo{make data} tải về, còn bảng nằm trong bucket. Theo bài viết ``Functional Data Engineering'' của Maxime Beauchemin, chạy lại ra cùng số cần cả dữ liệu không đổi lẫn code có version \\
+Code review & SQL, DAG và job Spark được review như code của app & bạn review thêm dữ liệu mà code mới sinh ra, bằng cách so số dòng và tổng tiền trước và sau (Module 10) \\
+Unit test với pytest & repo có 93 test, trong đó \repo{make test} chạy 88 test mà không cần Docker & test xanh chỉ nói code đúng trên dữ liệu mẫu. Sách \textit{The Site Reliability Workbook} của Google, chương 13, ghi rằng unit test không bắt được mọi lỗi của pipeline; test trên dữ liệu thật nằm ở Module 10 \\
+CI và lint & GitHub Actions chạy Ruff và pytest ở Module 10; \repo{make lint} chạy Ruff trên máy & test cần cả stack được tách ra bằng marker \code{e2e} của pytest, nên \repo{make test} chạy được mà không cần Docker, như trên một runner CI chỉ có uv và Java \\
+IaC & Terraform dựng một lát cắt AWS ở Module 13 rồi xoá & bucket chứa bảng là dữ liệu, không dựng lại được bằng \code{apply}. Mặc định Terraform không xoá bucket còn object; bật \code{force\_\allowbreak{}destroy} thì lệnh xoá hạ tầng xoá luôn mọi object, không khôi phục được \\
+Docker Compose & stack 6 service trong \repo{docker-compose.yml}, từ object storage tới Spark Connect & container dựng lại được, volume thì không: \repo{make down} giữ 3 named volume, còn \code{docker compose down -v} xoá chúng và mọi bảng mất theo \\
+\end{xltabular}
+% Nguồn: bài viết https://maximebeauchemin.medium.com/functional-data-engineering-a-modern-paradigm-for-batch-data-processing-2327ec32c42a (08/01/2018), đọc qua web.archive.org bản 20260812053740 ngày 06/11/2026: "To put it simply, immutable data along with versioned logic are key to reproducibility."
+% Nguồn: sách The Site Reliability Workbook, chương 13 Data Processing Pipelines, https://sre.google/workbook/data-processing/ mục Staging: "Unit tests won't catch all pipeline issues". https://raw.githubusercontent.com/hashicorp/terraform-provider-aws/main/website/docs/r/s3_bucket.html.markdown: force_destroy mặc định false, object bị xoá không khôi phục được.
+% Kiểm: collect-only với marker như make test trên bản chép, 06/11/2026: "88/93 tests collected (5 deselected)". lakehouse/pyproject.toml dòng 36 (marker e2e); Makefile dòng 33, 34 (test), 43, 44 (lint); docker-compose.yml dòng 10, 28, 45, 62, 88, 137 (6 service), 153 tới 156 (3 volume); README.md dòng 219, 220 (down giữ volume, down -v mất mọi bảng).
+
+\subsection{Thói quen phải đổi}
+
+Sáu thói quen dưới đây đúng với app nhưng sai với dữ liệu. Mỗi dòng trỏ tới module dạy cách làm mới bằng code chạy được, nên ở đây bạn chỉ cần nhận ra chúng.
+\begin{xltabular}{\textwidth}{@{}L L P{2.4cm}@{}}
+\toprule
+\thd{thói quen SWE} & \thd{trong DE thành} & \thd{học ở} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+vòng lặp gọi một query cho mỗi bản ghi & một câu theo tập cho cả bảng & Module 1 \\
+sửa dòng tại chỗ bằng \code{UPDATE} & ghi version mới; bảng hiện tại suy ra từ lịch sử thay đổi & Module 5 và 8 \\
+retry an toàn nhờ header \code{Idempotency-Key} & cả job chạy lại không nhân đôi dòng & Module 8 \\
+unit test xanh là đủ & test dữ liệu chạy trên dữ liệu thật sau mỗi lần ghi & Module 10 \\
+hợp đồng API viết bằng OpenAPI & bảng là API, có hợp đồng dữ liệu (data contract) chạy được như một bài kiểm & Module 10 \\
+giá server tính theo tháng & giá tính theo byte quét & Module 13 \\
+\end{xltabular}
+
+\subsection{Lối đi nhanh}
+
+Mỗi module có dòng \textit{Lướt được} trong thẻ module. Dòng này ghi các bài bạn có thể đọc nhanh nhờ nền SWE, kèm một bài kiểm 15 phút.
+\begin{itemize}
+  \item Làm bài kiểm 15 phút trước khi đọc các bài đó.
+  \item Đạt thì đọc lướt, chỉ dừng ở đoạn \textit{Chỗ so sánh gãy} và hộp \textit{Bẫy thường gặp}, rồi làm lab như bình thường.
+  \item Không đạt thì học đủ. Lab không lướt được, vì điều kiện ``hoàn thành khi'' là con số đúng trên máy của bạn.
+\end{itemize}
+
+Bảng dưới là gợi ý cho người đã làm backend; danh sách chính xác, kèm số bài, nằm ở thẻ của từng module. Module 3 và Module 5 không có trong bảng: hãy học đủ hai module này.
+\begin{xltabular}{\textwidth}{@{}l L L@{}}
+\toprule
+\thd{module} & \thd{thường lướt được} & \thd{đừng lướt, dù trông quen} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & khoá, ràng buộc và chuẩn hoá, nếu bạn từng viết migration có khoá ngoại & \code{NULL} và \code{NOT IN}; một câu theo tập thay cho vòng lặp \\
+2 & vòng đời DE; warehouse, lake và lakehouse; batch và streaming & viết yêu cầu và định nghĩa metric để hai người tính ra cùng một số \\
+4 & S3 là kho key và value: key phẳng, list có phân trang, upload nhiều phần & cách Parquet bỏ qua cả khối dòng nhờ giá trị min và max \\
+6 & mã hoá lúc lưu và lúc truyền; secret nằm ngoài code & xoá dữ liệu cá nhân khi bảng còn giữ các bản cũ \\
+7 & DataFrame chỉ chạy khi cần kết quả, nếu bạn quen Java Streams & dữ liệu chuyển qua mạng giữa các máy (shuffle), và vài khoá chiếm phần lớn dữ liệu (skew) \\
+8 & retry có backoff luỹ thừa; phân trang theo cursor & lưu cursor cùng lần commit dữ liệu; cả job chạy lại không nhân đôi dòng; dữ liệu đến muộn \\
+9 & test DAG bằng pytest & lịch chạy theo khoảng dữ liệu, và nạp lại dữ liệu quá khứ \\
+10 & runbook và postmortem, nếu bạn từng trực on-call & test dữ liệu; cổng write-audit-publish (ghi, kiểm rồi mới công bố); sao lưu và khôi phục catalog \\
+11 & data API có cache & quyền theo dòng và theo cột trên Trino \\
+12 & topic, partition, offset và consumer group, nếu bạn đã viết consumer Kafka & giờ của sự kiện (event time) và ngưỡng chờ dữ liệu đến muộn (watermark); ghi đúng một lần vào Iceberg \\
+13 & IAM quyền tối thiểu, ngân sách và cảnh báo chi phí, cú pháp Terraform & \code{terraform destroy} có thể xoá cả dữ liệu; giá theo byte quét; giới hạn của S3 Tables \\
+\end{xltabular}
+
+\subsection{Danh sách kiểm 1 giờ trên repo}
+
+Mục tiêu là chứng minh repo chạy trên máy bạn mà chưa cần Docker, và biết lệnh nào của \repo{Makefile} cần Docker. Bạn làm trên một bản chép của repo trong \code{lab\_\allowbreak{}m00/}, giống bản checkout sạch mà CI dùng. Nhờ vậy \repo{lakehouse/.venv}, venv mà các module sau dùng, không bị đụng tới.
+
+\begin{ghichu}
+\textbf{Cách chạy code trong mục này.}
+\begin{itemize}
+  \item Lần đầu, clone repo \repo{lakehouse/} từ \href{https://github.com/DPhO05/lakehouse}{github.com/DPhO05/lakehouse} vào một thư mục. Thư mục cha của \repo{lakehouse/} là nơi chạy các khối dưới.
+  \item Mọi khối là lệnh bash, chạy từ thư mục cha của \repo{lakehouse/}. Bạn cần \code{uv}, \code{make}, \code{rsync} và mạng ở lần chạy đầu; bước 4 cần mạng ở mọi lần chạy.
+  \item Lần đầu, trong \repo{lakehouse/} chạy \code{make data} để tải 9 file CSV của Olist vào \repo{source\_\allowbreak{}sim/data/}. Bước này cần mạng, và M1 cần các file này.
+  \item Bước 3 cần JDK 8, 11 hoặc 17 thì mới đạt \code{88 passed}, vì Spark 3.5.5 hỗ trợ ba bản này. Máy kiểm dùng OpenJDK 11.0.30.
+  \item Lệnh \code{cd} luôn nằm trong cặp ngoặc tròn, tức chạy trong một shell con (subshell), nên sau mỗi khối terminal của bạn vẫn đứng ở thư mục cha của \repo{lakehouse/}. Nếu \code{cd} lỗi, các lệnh sau nó trong ngoặc không chạy.
+  \item Thời gian chạy đổi theo máy và mạng, nên các khối chỉ in những dòng không đổi giữa các lần chạy. Thời gian đo được ghi trong lời giải thích.
+  \item Phần ``Kết quả'' là output thật, chạy ngày 06/11/2026 bằng uv 0.10.9 và Python 3.10.20. Lần đầu, máy chạy cả mục mất khoảng 4 tới 5 phút; phần còn lại của giờ là đọc output và tự làm bước 6.
+\end{itemize}
+\end{ghichu}
+% Kiểm: lần đầu với cache rỗng, đo bằng /usr/bin/time ngày 05/11/2026: uv sync 62,48 giây, make test 109,21 giây, make dag-check 103,50 giây, CLI help 0,65 giây; tổng khoảng 276 giây. Lần đầu ngày 06/11/2026, cache rỗng, đo thời gian quanh từng khối: K1 0,05 giây, K2 63,87 giây, K3 111,65 giây, K4 64,20 giây, K5 0,63 giây; tổng khoảng 240 giây.
+% Nguồn: https://github.com/apache/spark/blob/v3.5.5/docs/index.md dòng 37, mở ngày 06/11/2026: "Spark runs on Java 8/11/17". Kiểm: check_dags.sh dòng 7, 10 gọi uv pip install với file constraints trên GitHub ở mọi lần chạy.
+
+\textbf{Bước 1: chép repo.} Lệnh dưới xoá bản chép cũ nếu có, rồi chép repo mà bỏ \code{.venv}, cache bytecode và 9 file CSV. Test không cần CSV thật: test của \repo{source\_\allowbreak{}sim} dùng dữ liệu mẫu riêng.
+
+% chạy: K1
+\begin{codeblock}
+rm -rf lab_m00/lakehouse && mkdir -p lab_m00
+rsync -a --exclude .venv --exclude __pycache__ --exclude source_sim/data \
+  lakehouse/ lab_m00/lakehouse/
+(cd lab_m00/lakehouse &&
+  ls Makefile pyproject.toml uv.lock .python-version && cat .python-version)
+\end{codeblock}
+\textit{Kết quả:}
+% kết quả: K1
+\begin{codeblock}
+.python-version
+Makefile
+pyproject.toml
+uv.lock
+3.10
+\end{codeblock}
+
+Bốn file này là thứ các bước sau đọc. \repo{.python-version} ghim Python 3.10, còn \repo{uv.lock} ghim đúng phiên bản của từng gói, giống \code{package-lock.json} của npm. Nếu \code{rsync} báo lỗi có chữ \code{No such file or directory}, bạn đang đứng sai thư mục: \repo{lakehouse/} phải nằm ngay trong thư mục hiện tại.
+% Kiểm: tests/source_sim/test_app.py dòng 11, 14 đặt SIM_DATA_DIR là tests/fixtures/olist; K3 qua hết trên bản chép không có source_sim/data. Lỗi của openrsync ngày 06/11/2026: "rsync(51602): error: nosuchdir/: (l)stat: No such file or directory".
+
+\textbf{Bước 2: cài môi trường bằng \code{uv sync}.} uv tạo \code{.venv} trong bản chép theo \repo{uv.lock}: 40 gói, gồm cả nhóm dev như pytest, DuckDB và Ruff. Dòng cuối in phiên bản của Python, DuckDB và PySpark, ba thứ mà lab dùng nhiều nhất.
+
+% chạy: K2
+\begin{codeblock}
+(cd lab_m00/lakehouse && uv sync --quiet &&
+  .venv/bin/python -c 'import sys, duckdb, pyspark
+print(sys.version.split()[0], duckdb.__version__, pyspark.__version__)')
+\end{codeblock}
+\textit{Kết quả:}
+% kết quả: K2
+\begin{codeblock}
+3.10.20 1.5.6 3.5.5
+\end{codeblock}
+
+Số bản vá của Python có thể khác 3.10.20, vì \repo{.python-version} chỉ ghim 3.10; hai số sau phải đúng là 1.5.6 và 3.5.5.
+
+Lần đầu, uv tải hơn 400 MB, phần lớn là gói nguồn của PySpark 3.5.5 nặng 317 MB, nên lệnh im lặng khoảng 1 phút; bỏ cờ quiet nếu muốn xem tiến độ. Khi gói đã nằm trong cache của uv, lệnh này mất khoảng 4 giây. Bản chép chiếm khoảng 715 MB đĩa, gần hết là \code{.venv}.
+
+Lộ trình ghim DuckDB 2.0.0, nhưng bản này cần Python 3.11 trở lên. Repo dùng Python 3.10, nên venv của nó không cài được bản 2.0.0; \repo{uv.lock} ghim DuckDB 1.5.6, và các module chạy DuckDB ghi rõ output là của bản nào. Nếu uv dừng ở dòng có chữ \code{Failed to download} kèm tên một gói, uv chưa tải được gói đó: kiểm mạng hoặc proxy rồi chạy lại.
+% Kiểm: uv sync lần đầu với cache rỗng, 05/11/2026: "Installed 40 packages", real 62,48 giây, 8 wheel lớn nhất cộng 96,5 MiB; pyspark-3.5.5.tar.gz có size = 317214975 ở lakehouse/uv.lock dòng 508. Cache ấm, 06/11/2026: real 4,18 giây. Lần đầu, 06/11/2026, cache rỗng: 63,87 giây. du -sk, 06/11/2026: bản chép 698492 KiB, tức 715,3 MB; .venv 696092 KiB, tức 712,8 MB. Mọi MB trong trang này là 10^6 byte.
+% Kiểm: uv.lock dòng 71, 72 (duckdb 1.5.6), 502, 503 (pyspark 3.5.5); pyproject.toml dòng 5 (Python từ 3.10 tới trước 3.12), 14 tới 22 (nhóm dev). Nguồn: https://pypi.org/pypi/duckdb/2.0.0/json, requires_python >=3.11.0, file upload ngày 2026-10-21, mở ngày 06/11/2026. Kiểm, 06/11/2026: stat cho uv.lock sửa lần cuối 19/10/2026, trước ngày đó; uv.lock dòng 4 tới 8 đã tách nhánh python_full_version >= '3.11', nên giới hạn là Python của venv chứ không phải lock. Thiếu mạng, mô phỏng bằng cờ offline và cache rỗng ngày 06/11/2026: "Failed to download `certifi==2026.10.18`" rồi "Network connectivity is disabled, but the requested data wasn't found in the cache".
+
+\textbf{Bước 3: chạy unit test bằng \repo{make test}.} Lệnh này chạy pytest và bỏ hai nhóm test theo marker: test DAG, chạy ở bước 4, và test e2e, cần cả stack. Khối dưới tìm dòng tóm tắt cuối của pytest, dòng bắt đầu bằng dấu \code{=} và có thời gian chạy, rồi chỉ giữ các con số trên dòng đó. Khối không lấy dòng cuối cùng, vì khi có test lỗi, dòng cuối là thông báo lỗi của \code{make}.
+
+% chạy: K3
+\begin{codeblock}
+(cd lab_m00/lakehouse && make test 2>&1 | grep -E '^=+ .* in [0-9.]+s' \
+  | grep -oE '[0-9]+ (passed|failed|skipped|deselected|errors?)')
+\end{codeblock}
+\textit{Kết quả:}
+% kết quả: K3
+\begin{codeblock}
+88 passed
+5 deselected
+\end{codeblock}
+
+5 test bị bỏ là 4 test DAG và 1 test e2e. Trên máy kiểm, lệnh mất chưa tới 2 phút, gần hết cho 30 test chạy Spark local; lần đầu, Spark còn tải jar Iceberg runtime khoảng 45 MB.
+
+Nếu kết quả có \code{30 skipped} hoặc \code{30 errors} và chỉ còn \code{58 passed}, máy bạn chưa có JDK chạy được. Khi PATH không có lệnh \code{java}, như trên Linux chưa cài JDK, 30 test Spark local tự bỏ qua với lý do ``cần Java để chạy Spark local'' (\repo{tests/conftest.py}, dòng 17 và 18).
+
+macOS thì luôn có sẵn \code{/usr/bin/java}, kể cả khi chưa cài JDK, nên trên Mac các test này báo lỗi thay vì bỏ qua. Chạy \code{java -version} để kiểm, rồi cài JDK 11 như máy kiểm, hoặc JDK 8 hay 17. Nếu có \code{failed}, hoặc vẫn có \code{errors} khi JDK đã đúng bản, chạy \repo{make test} không qua \code{grep} để xem test nào hỏng.
+% Kiểm: 06/11/2026: real 104,96 giây; 05/11/2026 với thư mục Ivy rỗng: real 109,21 giây; 06/11/2026 với thư mục Ivy rỗng: 111,65 giây. Jar iceberg-spark-runtime-3.5_2.12-1.8.1 nặng 45166693 byte theo ls -l trong thư mục Ivy, 06/11/2026, khớp content-length trên Maven Central; khai ở tests/conftest.py dòng 12, nạp ở dòng 27. 4 test DAG ở tests/airflow/test_dags.py; 1 test e2e ở tests/e2e/test_pipeline.py dòng 106.
+% Kiểm: 06/11/2026, make test trên bản chép. PATH không có java: "58 passed, 30 skipped, 5 deselected, 1 warning in 5.74s". Một java giả thoát mã 1 đứng đầu PATH: "58 passed, 5 deselected, 1 warning, 30 errors in 6.66s", rồi dòng cuối "make: *** [test] Error 1"; K3 vẫn in 58 passed, 5 deselected, 30 errors.
+% Kiểm: /usr/bin/java là file của macOS: ls -lO cho cờ restricted, mount cho / là volume sealed, read-only (Darwin 25.6.0, 06/11/2026); trên máy kiểm, which -a java chỉ ra /usr/bin/java, và nó chạy OpenJDK 11.0.30 của Homebrew.
+
+\textbf{Bước 4: kiểm DAG bằng \repo{make dag-check}.} Script \repo{airflow/check\_\allowbreak{}dags.sh} dựng một venv riêng có Airflow 3.1.6 trên Python 3.11, rồi chạy 4 test parse, serialize và kiểm cấu hình của 3 DAG. Airflow chạy trong venv đó ngay trên máy bạn, không trong container, nên bước này không cần Docker. Venv nằm ngoài repo, mặc định ở \code{/tmp/lakehouse-airflow-check}.
+
+% chạy: K4
+\begin{codeblock}
+(cd lab_m00/lakehouse && make dag-check 2>&1 | tail -n 1 \
+  | grep -oE '[0-9]+ (passed|failed|skipped|errors?)')
+\end{codeblock}
+\textit{Kết quả:}
+% kết quả: K4
+\begin{codeblock}
+4 passed
+\end{codeblock}
+
+Lần đầu mất 1 tới 2 phút vì uv phải giải và tải 130 gói, và venv đó chiếm khoảng 690 MB; các lần sau mất khoảng 3 giây. Script đọc file constraints của Airflow 3.1.6 từ GitHub ở mọi lần chạy, nên luôn cần mạng. Nếu không ghi được vào \code{/tmp}, đặt biến \code{AIRFLOW\_\allowbreak{}CHECK\_\allowbreak{}VENV} trỏ tới thư mục khác.
+% Kiểm: airflow/check_dags.sh dòng 2 (3 DAG; parse, serialize, cấu hình), 6 (mặc định /tmp/lakehouse-airflow-check), 7 (constraints-3.1.6 trên raw.githubusercontent.com), 9 (Python 3.11), 10, 11 (apache-airflow==3.1.6). Lần đầu, 05/11/2026: "Resolved 130 packages in 1m 27s", "Installed 130 packages", real 103,50 giây; lần sau, 06/11/2026: real 2,74 giây. Lần đầu, 06/11/2026, cache rỗng: 64,20 giây; du -sk của venv: 674188 KiB, tức 690,4 MB. UV_OFFLINE=1 make dag-check với venv đã có, 06/11/2026: "error: Network connectivity is disabled, but a remote requirements file was requested: https://raw.githubusercontent.com/apache/airflow/constraints-3.1.6/constraints-3.11.txt".
+
+\textbf{Bước 5: gọi CLI.} Lệnh dưới in phần trợ giúp của CLI \code{lakehouse} và chỉ giữ bốn dòng lệnh con. Lệnh này chỉ đọc code, không gửi gì tới Spark, nên chạy được khi Docker tắt.
+
+% chạy: K5
+\begin{codeblock}
+(cd lab_m00/lakehouse && uv run lakehouse --help | grep -E '^ {4}[a-z]')
+\end{codeblock}
+\textit{Kết quả:}
+% kết quả: K5
+\begin{codeblock}
+    bootstrap           tạo namespace và table (chạy lại an toàn)
+    bronze              REST API -> iceberg.raw.*
+    silver              raw -> staging -> semantic -> core
+    maintenance         compaction, expire, xoá file mồ côi
+\end{codeblock}
+
+Bốn lệnh con là bốn bước của pipeline, và mỗi lệnh có một target cùng tên trong \repo{Makefile}. Nếu uv báo \code{Failed to spawn}, bạn đang đứng ngoài thư mục có \repo{pyproject.toml}: \code{uv run} chỉ thấy lệnh \code{lakehouse} trong project của nó.
+% Kiểm: CLI help chạy được ngày 05/11/2026 lúc Docker tắt, real 0,65 giây. Gọi từ lab_m00/ ngày 06/11/2026: "error: Failed to spawn: `lakehouse`", "Caused by: No such file or directory (os error 2)".
+
+\textbf{Bước 6: lệnh nào cần Docker.} Mở \repo{Makefile} của bản chép: 13 target nằm ở dòng 4 tới 44. Tự đánh dấu target nào cần Docker, rồi mới so với bảng dưới.
+
+\begin{xltabular}{\textwidth}{@{}P{3.6cm} P{1.6cm} L@{}}
+\toprule
+\thd{target} & \thd{cần Docker} & \thd{vì sao} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\repo{up}, \repo{down}, \repo{ps}, \repo{logs} & có & gọi thẳng \code{docker compose} \\
+\repo{bootstrap}, \repo{bronze}, \repo{silver}, \repo{maintenance} & có & CLI chạy trên máy bạn nhưng gửi job tới Spark Connect ở \code{sc://localhost:15002}; Bronze còn gọi API nguồn ở \code{http://localhost:8000}. Cả hai là container của stack \\
+\repo{e2e} & có & chạy cả pipeline trên stack đang chạy \\
+\repo{data} & không & \code{curl} tải 9 file CSV từ GitHub, chỉ cần mạng \\
+\repo{test}, \repo{dag-check}, \repo{lint} & không & pytest, venv Airflow riêng và Ruff đều chạy trên máy \\
+\end{xltabular}
+% Kiểm: Makefile dòng 4 tới 15 (docker compose), 17, 18 (data), 20 tới 30 (CLI), 33, 34 (test), 37, 38 (e2e), 40, 41 (dag-check), 43, 44 (lint). src/lakehouse/config.py dòng 22, 23 (SPARK_REMOTE mặc định sc://localhost:15002, OLIST_API_BASE_URL mặc định http://localhost:8000); pyproject.toml dòng 36; source_sim/download_olist.sh dòng 5, 27.
+
+\begin{luuy}
+\textbf{Bẫy thường gặp.}
+\begin{itemize}
+  \item \textbf{Nghĩ bản chép tách khỏi stack.} Bản chép chỉ tách code và venv. CLI của nó vẫn nối tới \code{localhost:15002}, nên \repo{make bronze} chạy trong \code{lab\_\allowbreak{}m00/\allowbreak{}lakehouse/} ghi vào đúng các bảng của stack đang chạy. Giống chạy migration từ một nhánh feature vào database dev dùng chung: code nằm ở nhánh riêng, dữ liệu thì không.
+  \item \textbf{Chạy \code{uv sync} ngay trong \repo{lakehouse/}.} Mặc định \code{uv sync} xoá mọi gói không khai báo trong project, nên gói bạn tự cài thêm vào \repo{lakehouse/.venv} sẽ mất. Đó là lý do danh sách kiểm này chạy trên bản chép.
+\end{itemize}
+% Kiểm: uv help sync, uv 0.10.9, 06/11/2026: "By default, an exact sync is performed: uv removes packages that are not declared as dependencies of the project."
+\end{luuy}
+
+\hoanthanh{bước 3 in \code{88 passed} và \code{5 deselected}; bước 4 in \code{4 passed}; bước 5 liệt kê bốn lệnh con \code{bootstrap}, \code{bronze}, \code{silver}, \code{maintenance}; và ở bước 6 bạn tự đánh dấu đúng 9 trên 13 target cần Docker trước khi đọc bảng.}
