@@ -1,7 +1,7 @@
 % !TEX program = xelatex
 % =====================================================================
 %  Lộ trình Data Engineer: xây và vận hành lakehouse mã nguồn mở
-%  Phiên bản 1.0, cập nhật 02/11/2026
+%  Phiên bản 2.0 nháp, cập nhật 06/11/2026
 %  Biên dịch bằng XeLaTeX (chạy 2 lần để có mục lục).
 %  Overleaf: Menu > Settings > Compiler = XeLaTeX.
 % =====================================================================
@@ -180,11 +180,11 @@
 \vspace{1.2em}
 \begin{minipage}{0.88\linewidth}
 \large
-\textbf{5 phần \textbar{} 13 module \textbar{} 1 dự án capstone \textbar{} khoảng 315 giờ}\par\medskip
-Mỗi module gồm mục tiêu học, tài liệu chính thức, khoá học miễn phí, lab thực hành trên bộ dữ liệu công khai Olist và một bài thử thách kỹ năng. Kiến thức và phiên bản phần mềm được đối chiếu với tài liệu chính thức của từng dự án.
+\textbf{5 phần \textbar{} 13 module \textbar{} 1 dự án capstone \textbar{} 288 giờ lõi}\par\medskip
+Mỗi module là một tutorial thực hành trên dữ liệu Olist và repo \repo{lakehouse}, gồm bài học có code chạy được kèm output thật, lab kết thúc bằng một con số kiểm được, và một bài thử thách kỹ năng. Phiên bản phần mềm được ghim và đối chiếu với tài liệu chính thức của từng dự án.
 \end{minipage}
 \vfill
-{\sffamily\color{muted}Phiên bản 1.0 \textbar{} cập nhật 02/11/2026\par}
+{\sffamily\color{muted}Phiên bản 2.0 nháp \textbar{} cập nhật 06/11/2026\par}
 \end{titlepage}
 
 \tableofcontents
@@ -196,15 +196,15 @@ Mỗi module gồm mục tiêu học, tài liệu chính thức, khoá học mi�
 
 Lộ trình này đưa bạn từ SQL tới việc tự xây và vận hành một \textbf{lakehouse mã nguồn mở}: dữ liệu nằm trên object storage, được tổ chức thành bảng Apache Iceberg, quản lý bằng một REST catalog, xử lý bằng Spark, điều phối bằng Airflow, kiểm tra chất lượng trước khi phục vụ qua Trino và BI, rồi đưa lên cloud.
 
-Cách trình bày theo mô hình của các lộ trình học chính thức. Giống \href{https://www.skills.google/paths/16}{learning path Professional Data Engineer của Google Cloud}, lộ trình đi theo vai trò công việc, gồm nội dung học, lab thực hành và một bài thử thách cuối mỗi phần để chứng minh kỹ năng, rồi ánh xạ sang chứng chỉ. Giống \href{https://www.anthropic.com/learn/build-with-claude}{trang học của Anthropic}, mỗi chủ đề mở đầu bằng mục ``Bắt đầu'', tiếp theo là tài liệu chính thức, khoá học và bài thực hành.
+Cách trình bày theo mô hình của các lộ trình học chính thức. Giống \href{https://www.skills.google/paths/16}{learning path Professional Data Engineer của Google Cloud}, lộ trình đi theo vai trò công việc, gồm nội dung học, lab thực hành và một bài thử thách cuối mỗi phần để chứng minh kỹ năng, rồi ánh xạ sang chứng chỉ. Từ bản 2.0, mỗi module mở bằng một vấn đề thật có số đo, rồi tới các bài học có code chạy được; khung đầy đủ nằm ở mục \textit{Cách tổ chức}.
 
 \section{Dành cho ai}
 \begin{itemize}
-  \item Sinh viên công nghệ thông tin và kỹ sư phần mềm muốn chuyển sang data engineering.
+  \item Sinh viên công nghệ thông tin và kỹ sư phần mềm muốn chuyển sang data engineering. Nếu bạn đã làm phần mềm, đọc mục \textit{Bắt đầu từ nền SWE} ở cuối chương này trước Module 1.
   \item Data analyst muốn tự xây pipeline thay vì chỉ dùng dữ liệu có sẵn.
   \item Kỹ sư dữ liệu đã quen warehouse truyền thống, muốn hiểu lakehouse và open table format từ bên trong.
 \end{itemize}
-Bạn cần biết lập trình Python ở mức cơ bản, dùng được dòng lệnh và Docker. Không cần biết trước SQL: Module 1 bắt đầu từ đầu.
+Bạn cần biết lập trình Python ở mức cơ bản, dùng được dòng lệnh và Docker. Không cần biết trước SQL: Module 1 dạy SQL từ câu \code{SELECT}, lấy ví dụ từ ORM cho người đã làm app, và có thêm tới 25 giờ luyện tập cho người mới bắt đầu.
 
 \section{Học xong bạn làm được gì}
 \begin{itemize}
@@ -216,7 +216,9 @@ Bạn cần biết lập trình Python ở mức cơ bản, dùng được dòng
 \end{itemize}
 
 \section{Cách tổ chức}
-Lộ trình có \textbf{5 phần, 13 module và 1 dự án capstone}, tổng khoảng \textbf{315 giờ lõi}. Với 10 giờ mỗi tuần, bạn cần khoảng 8 tháng, cộng thời gian ôn tập thì thành 8 tới 9 tháng. Mỗi module có cùng một khung:
+Lộ trình có \textbf{5 phần}: bốn phần học theo module, và Phần V cho capstone, chứng chỉ và nghề nghiệp. Phần lõi gồm \textbf{trang khởi động cho SWE và 13 module}, tổng \textbf{288 giờ}. Dự án capstone được xây dần qua bốn mốc, ở cuối Phần I tới IV. Ngoài lõi có \textbf{3 nhánh tuỳ chọn}, tổng 26 giờ.
+
+Lịch tính 10 giờ mỗi tuần: 9 giờ học module và 1 giờ cho chương nghề nghiệp. Với nhịp đó, phần lõi mất khoảng \textbf{8 tháng}; thêm ôn chứng chỉ và cả ba nhánh thì gần 10 tháng. Mỗi module viết theo kiểu tutorial thực hành và có cùng một khung:
 
 \begin{xltabular}{\textwidth}{@{}P{3.6cm} L@{}}
 \toprule
@@ -225,17 +227,18 @@ Lộ trình có \textbf{5 phần, 13 module và 1 dự án capstone}, tổng kho
 \endhead
 \bottomrule
 \endfoot
-Bạn sẽ học được & mục tiêu học, mỗi mục là một việc bạn làm được sau module \\
-Nội dung chính & các khái niệm theo thứ tự học, mỗi khái niệm dẫn tới docs chính thức \\
-Bắt đầu & một tới ba tutorial hoặc quickstart chính thức để làm ngay buổi đầu \\
-Tài liệu chính thức & docs, spec, hướng dẫn của dự án hoặc nhà cung cấp, kèm thời lượng ước tính \\
-Khoá học miễn phí & khoá học chính thức hoặc khoá đại học công khai, ghi rõ phần nào miễn phí \\
-Lab thực hành & bài làm từng bước trên stack tham chiếu và dữ liệu Olist, mỗi lab có điều kiện ``hoàn thành khi'' \\
-Kế hoạch theo tuần & cách chia thời lượng của module theo tuần \\
-Thử thách kỹ năng & một bài không có hướng dẫn từng bước, giống challenge lab của skill badge \\
-Câu hỏi tự kiểm tra & câu hỏi bám theo mục tiêu học \\
-Điểm dễ nhầm & những hiểu lầm phổ biến, mỗi dòng dẫn tới docs chính thức \\
+Thẻ module & cấp độ, tiên quyết, giờ lõi và giờ thêm; file, bảng và service của repo mà module dùng; phiên bản ghim kèm link docs đúng bản; bài nào lướt được nhờ nền SWE, kèm một bài kiểm 15 phút \\
+Vấn đề thật & một chuyện có số đo trên Olist hoặc trong production, kết bằng câu hỏi mà module trả lời \\
+Từ SWE sang DE & bảng nối thứ bạn đã biết với tên gọi trong DE, ghi giống ở đâu và khác ở đâu; mỗi chỗ khác được xử lý trong một bài \\
+Bạn sẽ làm được & bốn tới sáu việc bắt đầu bằng động từ, mỗi việc khớp một điều kiện ``hoàn thành khi'' \\
+Bài học & mỗi khái niệm một bài: vấn đề, giải thích bằng lời thường từ thứ bạn đã biết, so với SWE và chỗ so sánh gãy, làm thử bằng code có output thật, bẫy thường gặp \\
+Lab & làm từng bước trên repo và dữ liệu Olist; mỗi bước có lệnh, output mong đợi và gợi ý khi lỗi; kết bằng ``hoàn thành khi'' là một lệnh trả về đúng số \\
+Thử thách kỹ năng & một bài không có hướng dẫn từng bước, giống challenge lab của skill badge, kèm tiêu chí đạt và phần mang vào capstone \\
+Tự kiểm tra & năm tới tám câu, đáp án ngắn ở cuối module \\
+Đọc thêm & tối đa 7 mục, mỗi mục ghi vì sao đọc, đọc phần nào, mất bao lâu, phiên bản nào \\
+Kế hoạch theo tuần & chia module theo tuần 9 giờ, tách phần lõi và phần thêm nếu còn giờ; tuần cuối làm thử thách \\
 \end{xltabular}
+Trang khởi động cho SWE không theo khung này: nó chỉ có bốn mục, gồm thứ mang sang thẳng, thói quen phải đổi, lối đi nhanh và danh sách kiểm 1 giờ trên repo.
 
 \section{Chọn điểm bắt đầu}
 Không phải ai cũng cần học theo đúng thứ tự từ Module 1. Hãy chọn lối vào hợp với bạn, giống cách các học viện của nhà cung cấp chia track theo người học.
@@ -249,16 +252,22 @@ Không phải ai cũng cần học theo đúng thứ tự từ Module 1. Hãy ch
 \endfoot
 Mới với dữ liệu & Module 1, đi theo thứ tự & giữ đủ thời lượng của Module 1 và 3, đó là nền cho mọi phần sau \\
 Đã vững SQL & làm thử thách kỹ năng của Module 1; đạt thì sang Module 2 và 3 & phần lớn thời gian nên dồn vào Phần II \\
-Kỹ sư backend hoặc cloud & Module 1 và 3 dạng kiểm tra nhanh, rồi Module 4 tới 6 & bạn đã quen Docker, Git, CI, nên Module 10 và 13 có thể đi nhanh \\
+Kỹ sư phần mềm, backend hoặc cloud & mục \textit{Bắt đầu từ nền SWE} ở cuối chương này, rồi Module 1 theo thứ tự & làm danh sách kiểm 1 giờ trên repo trước; ở mỗi module, bài kiểm 15 phút trong thẻ module cho biết bài nào lướt được \\
 Đã quen warehouse & Module 4 tới 6 trước, rồi quay lại Module 7 & đọc kỹ phần catalog và commit, đó là chỗ lakehouse khác warehouse nhiều nhất \\
 \end{xltabular}
 
 \section{Nguyên tắc về nguồn}
 \begin{itemize}
-  \item Mọi khẳng định kỹ thuật dẫn tới \textbf{tài liệu chính thức}: docs, spec, release notes của dự án, hướng dẫn của nhà cung cấp cloud, trang của chương trình chứng chỉ. Sách là tài liệu đọc thêm, liệt kê ở phụ lục.
+  \item Khẳng định kỹ thuật dẫn tới \textbf{tài liệu chính thức}: docs, spec, release notes của dự án, hướng dẫn của nhà cung cấp cloud, trang của chương trình chứng chỉ.
+  \item Bài viết của kỹ sư có tên tuổi và sách cũng được trích, nhất là ở phần so với SWE. Chúng luôn được ghi rõ là ``bài viết'' hay ``sách'', vì đó là ý kiến của tác giả chứ không phải đặc tả.
+  \item Phụ lục B liệt kê sách đọc thêm theo module; sách chỉ trích ở một chỗ thì ghi ngay tại chỗ đó.
+  \item Mọi con số ghi kèm cách đo: lệnh đã chạy cùng ngày và phiên bản, file và dòng của repo, hoặc link nguồn. Cùng một phép đo có thể ra số khác nhau tuỳ cách dựng, ví dụ đọc từ bảng đã nạp hay đọc thẳng file CSV, nên cách đo quan trọng ngang con số.
+  \item Output dưới mỗi khối code là output thật kèm ngày chạy; khối chưa chạy được ghi rõ ``chưa chạy'' và lý do. Nguồn và lệnh kiểm của từng câu nằm trong các comment \code{\% Nguồn} và \code{\% Kiểm} của file \code{.tex}.
   \item Phiên bản phần mềm và thông tin chứng chỉ được kiểm ngày \textbf{02/11/2026}. Phần mềm thay đổi nhanh: hãy ghim phiên bản trong môi trường học và luôn mở bộ docs đúng phiên bản bạn chạy, không mặc định mở bản \code{latest}.
   \item Thời lượng là ước tính cho phần lõi. Mỗi module có phần ``thêm'' để bạn quay lại khi còn thời gian.
 \end{itemize}
+
+\input{modules/m00_khoi_dong_swe}
 
 % ====================== BẢN ĐỒ ======================
 \plainchapter{Bản đồ lộ trình}
@@ -266,78 +275,103 @@ Kỹ sư backend hoặc cloud & Module 1 và 3 dạng kiểm tra nhanh, rồi Mo
 Thứ tự đi từ nền tảng tới vận hành: học cách hỏi dữ liệu và mô hình hoá trước, rồi hiểu dữ liệu được lưu thế nào, sau đó mới xây pipeline, cuối cùng là phục vụ, streaming và cloud. Dự án capstone chạy xuyên suốt, mỗi phần thêm một mốc.
 
 \begin{codeblock}
-PHẦN I    Nền tảng
-            M1  SQL và mô hình quan hệ
-            M2  Vòng đời DE và kiến trúc dữ liệu
-            M3  Mô hình dữ liệu cho phân tích
-            ─► Mốc capstone 1: star schema cho Olist
+M0  Trang khởi động cho SWE, mục "Bắt đầu từ nền SWE" ở cuối chương mở đầu
    │
-PHẦN II   Lưu trữ và lakehouse
-            M4  Lưu trữ và định dạng file
-            M5  Open table format: Apache Iceberg
-            M6  Catalog, metadata và governance
-            ─► Mốc capstone 2: raw và staging trên Iceberg
+PHẦN I    Nền tảng                                      85 giờ, tính cả M0
+            M1  SQL cho người đã quen ORM
+            M2  Vòng đời DE, yêu cầu và chọn kho
+            M3  Mô hình dữ liệu phân tích: thiết kế Gold cho Olist
+            ─► Mốc capstone 1: star schema Gold trên DuckDB, đối soát đúng
    │
-PHẦN III  Xử lý và vận hành pipeline
-            M7  Apache Spark
-            M8  Ingestion và pattern pipeline
-            M9  Orchestration với Airflow
-            M10 Chất lượng dữ liệu, test và DataOps
-            ─► Mốc capstone 3: pipeline tăng dần có test
+PHẦN II   Lưu trữ và lakehouse                                      61 giờ
+            M4  File, object storage và Python cho dữ liệu
+            M5  Apache Iceberg qua lăng kính Git
+            M6  Catalog, bảo mật và dữ liệu cá nhân
+            ─► Mốc capstone 2: giải thích mọi file của raw.olist_orders,
+               diễn tập xoá dữ liệu cá nhân trên bản sao
    │
-PHẦN IV   Phục vụ, streaming và cloud
-            M11 Phục vụ dữ liệu: Trino và BI
-            M12 Streaming: Kafka và Flink
-            M13 Cloud và vận hành production
-            ─► Mốc capstone 4: dashboard và bản trên cloud
+PHẦN III  Xử lý và vận hành pipeline                                90 giờ
+            M7  Spark cho người quen Java Streams, và dựng Gold
+            M8  Ingestion từ REST API và áp thay đổi vào bảng
+            M9  Airflow 3: viết và test DAG
+            M10 Chất lượng, môi trường và vận hành dữ liệu
+            ─► Mốc capstone 3: marts tăng dần chạy bằng Airflow,
+               có cổng write-audit-publish và SLO độ tươi
+   │
+PHẦN IV   Phục vụ, streaming và cloud                               52 giờ
+            M11 Phục vụ dữ liệu: Trino, quyền, BI và data API
+            M12 Streaming: Kafka API và Flink
+            M13 Cloud: mang lakehouse lên AWS
+            ─► Mốc capstone 4: dashboard qua Trino, data API, lát cắt AWS
    │
 PHẦN V    Capstone, chứng chỉ và nghề nghiệp
+            nghề nghiệp: 1 giờ mỗi tuần, song song với module
+            ôn chứng chỉ: 30 tới 40 giờ, sau phần lõi
+
+NHÁNH TUỲ CHỌN, sau phần lõi                                        26 giờ
+            T1  dbt trên DuckDB                                sau M10
+            T2  CDC từ log: Debezium và Kafka Connect          sau M12
+            T3  Dữ liệu cho AI trên review Olist          sau capstone
 \end{codeblock}
 
 \section{Các module}
-\begin{xltabular}{\textwidth}{@{}l L P{2.6cm} r P{2.4cm}@{}}
+\begin{xltabular}{\textwidth}{@{}l L P{2.6cm} r P{2.6cm}@{}}
 \toprule
 \thd{module} & \thd{tên} & \thd{cấp độ} & \thd{giờ} & \thd{tiên quyết} \\
 \midrule
 \endhead
 \bottomrule
 \endfoot
-1 & SQL và mô hình quan hệ & cơ bản & 35 & không \\
-2 & Vòng đời Data Engineering và kiến trúc dữ liệu & cơ bản & 15 & 1 \\
-3 & Mô hình dữ liệu cho phân tích & cơ bản tới trung cấp & 30 & 1 \\
-4 & Lưu trữ và định dạng file & trung cấp & 20 & 1, 2 \\
-5 & Open table format: Apache Iceberg & trung cấp tới nâng cao & 35 & 4 \\
-6 & Catalog, metadata và governance & trung cấp & 15 & 5 \\
-7 & Apache Spark và tính toán phân tán & trung cấp & 30 & 1, 5 \\
-8 & Ingestion và các pattern pipeline & trung cấp & 20 & 5, 7 \\
-9 & Orchestration với Apache Airflow & trung cấp & 20 & 8 \\
-10 & Chất lượng dữ liệu, test và DataOps & trung cấp & 20 & 8, 9 \\
-11 & Phục vụ dữ liệu: Trino và BI & trung cấp & 15 & 3, 5, 6 \\
-12 & Streaming: Kafka và Flink & nâng cao & 30 & 5, 7, 8 \\
-13 & Cloud và vận hành production & nâng cao & 30 & 5, 6, 9 \\
+0 & Trang khởi động cho SWE, mục \textit{Bắt đầu từ nền SWE} ở cuối chương ``Về lộ trình này'' & cơ bản & 2 & không \\
+1 & SQL cho người đã quen ORM; thêm tới 25 giờ luyện tập & cơ bản & 40 & 0 \\
+2 & Vòng đời DE, yêu cầu và chọn kho & cơ bản & 13 & 1; học song song với 3 được \\
+3 & Mô hình dữ liệu phân tích: thiết kế Gold cho Olist & cơ bản tới trung cấp & 30 & 1 \\
+4 & File, object storage và Python cho dữ liệu & trung cấp & 20 & 1, 2 \\
+5 & Apache Iceberg qua lăng kính Git & trung cấp tới nâng cao & 28 & 4 \\
+6 & Catalog, bảo mật và dữ liệu cá nhân & trung cấp & 13 & 5 \\
+7 & Spark cho người quen Java Streams, và dựng Gold & trung cấp & 28 & 1, 3, 5 \\
+8 & Ingestion từ REST API và áp thay đổi vào bảng & trung cấp & 24 & 5, 7 \\
+9 & Airflow 3: viết và test DAG & trung cấp & 16 & 8 \\
+10 & Chất lượng, môi trường và vận hành dữ liệu & trung cấp & 22 & 7, 9 \\
+11 & Phục vụ dữ liệu: Trino, quyền, BI và data API & trung cấp & 14 & 3, 6, 7 \\
+12 & Streaming: Kafka API và Flink & nâng cao & 20 & 5, 7, 8 \\
+13 & Cloud: mang lakehouse lên AWS & nâng cao & 18 & 5, 6, 9, 10 \\
 \midrule
- & \textbf{tổng} & & \textbf{315} & \\
+ & \textbf{tổng phần lõi} & & \textbf{288} & \\
+\midrule
+T1 & Nhánh dbt trên DuckDB, tuỳ chọn & trung cấp & 10 & 3; nên học sau 10 \\
+T2 & Nhánh CDC từ log: Debezium và Kafka Connect, tuỳ chọn & nâng cao & 8 & 8, 12 \\
+T3 & Nhánh dữ liệu cho AI trên review Olist, tuỳ chọn & trung cấp & 8 & 10; học sau capstone \\
+\midrule
+ & \textbf{tổng ba nhánh} & & \textbf{26} & \\
 \end{xltabular}
 
 \section{Lịch gợi ý theo tháng}
-Lịch tính cho 10 giờ mỗi tuần, khoảng 40 giờ mỗi tháng.
+Lịch tính cho 10 giờ mỗi tuần: 9 giờ học module và 1 giờ cho chương nghề nghiệp. Mỗi tháng tính 4 tuần, tức 36 giờ module; tuần dư của tháng dài dùng làm đệm.
 
-\begin{xltabular}{\textwidth}{@{}l P{2.4cm} r L@{}}
+\begin{xltabular}{\textwidth}{@{}l P{3.8cm} r L@{}}
 \toprule
-\thd{tháng} & \thd{module} & \thd{giờ} & \thd{mốc capstone} \\
+\thd{tháng} & \thd{học} & \thd{giờ cộng dồn} & \thd{mốc capstone} \\
 \midrule
 \endhead
 \bottomrule
 \endfoot
-1 & 1 & 35 & dựng PostgreSQL và DuckDB, nạp CSV Olist \\
-2 & 2, 3 & 45 & mốc 1: thiết kế star schema \\
-3 & 4, 5 & 55 & bảng raw trên Iceberg; tuần cuối của Module 5 có thể tràn sang tháng 4 \\
-4 & 6, 7 & 45 & mốc 2: staging trên Iceberg, phân quyền trên catalog \\
-5 & 8, 9 & 40 & pipeline tăng dần chạy bằng Airflow \\
-6 & 10, 11 & 35 & mốc 3: test chặn tầng marts; Trino và dashboard \\
-7 & 12 & 30 & nhánh streaming cho sự kiện đơn hàng \\
-8, 9 & 13 và hoàn thiện & 30 cộng ôn tập & mốc 4: bản trên AWS, README, runbook, ôn chứng chỉ \\
+1 & M0 và 34 giờ đầu của M1 & 36 & \\
+2 & hết M1; M2; 17 giờ đầu của M3 & 72 & \\
+3 & hết M3; M4; 3 giờ đầu của M5 & 108 & mốc 1 khi xong M3, ở giờ 85: bus matrix, grain và star schema Gold trên DuckDB cho năm câu hỏi; phương trình đối soát đúng \\
+4 & hết M5; 11 giờ đầu của M6 & 144 & \\
+5 & hết M6; M7; 6 giờ đầu của M8 & 180 & mốc 2 khi xong M6, ở giờ 146: giải thích được mọi file của \code{raw.olist\_\allowbreak{}orders} trong bucket; diễn tập xoá dữ liệu cá nhân trên bản sao, có bước khôi phục \\
+6 & hết M8; M9; 2 giờ đầu của M10 & 216 & \\
+7 & hết M10; M11; 2 giờ đầu của M12 & 252 & mốc 3 khi xong M10, ở giờ 236: \code{marts} tăng dần chạy bằng Airflow, có cổng write-audit-publish, SLO độ tươi có alert, và một lần khôi phục catalog đã thử \\
+8 & hết M12; M13 & 288 & mốc 4 khi xong M13, ở giờ 288: dashboard Metabase qua Trino có quyền chỉ đọc, một data API, và một lát cắt AWS dựng rồi xoá bằng Terraform; luồng sự kiện vào Iceberg là phần tuỳ chọn \\
+9 & T1, T2; 18 giờ đầu của phần ôn chứng chỉ & 324 & \\
+10 & hết ôn chứng chỉ, tổng 30 tới 40 giờ; T3 nếu muốn & 344 tới 354 & \\
 \end{xltabular}
+\begin{itemize}
+  \item Chỉ phần lõi: 288 giờ, 8 tháng. Lõi cộng ôn chứng chỉ: 318 tới 328 giờ, 8,8 tới 9,1 tháng. Lõi, ba nhánh và ôn chứng chỉ: 344 tới 354 giờ, 9,6 tới 9,8 tháng.
+  \item Không tháng nào vượt 36 giờ module. Nếu Module 1 dùng hết 25 giờ thêm, mọi mốc sau lùi tối đa khoảng 3 tuần.
+  \item Giờ của từng module là ước lượng; chưa ai học thử theo lịch này.
+\end{itemize}
 
 \begin{ghichu}
 \textbf{Thói quen mỗi tuần.} Một buổi đọc docs, hai buổi làm lab, một buổi viết lại bằng lời của bạn những gì vừa học. Ghi từ mới vào một file thuật ngữ riêng. Cuối mỗi module, làm thử thách kỹ năng mà không mở tài liệu.
@@ -416,7 +450,7 @@ Xuyên suốt: Parquet trên RustFS · bảng Iceberg · REST catalog · Airflow
 \end{codeblock}
 
 
-\partpage{I}{Nền tảng}{Hỏi dữ liệu bằng SQL, hiểu vòng đời và kiến trúc dữ liệu, thiết kế mô hình cho phân tích. Kết thúc bằng mốc capstone 1: star schema cho Olist.}
+\partpage{I}{Nền tảng}{Hỏi dữ liệu bằng SQL, hiểu vòng đời và kiến trúc dữ liệu, thiết kế mô hình cho phân tích. Kết thúc bằng mốc capstone 1: bus matrix, grain và star schema Gold trên DuckDB cho năm câu hỏi, có phương trình đối soát đúng.}
 % ---------------- m01_03 ----------------
 % Module 1, 2, 3 của "Lộ trình Data Engineer: xây lakehouse mã nguồn mở"
 % =====================================================================
@@ -740,8 +774,9 @@ Learning Spark & bản 2, O'Reilly, 2020 & 7 \\
 \plainchapter{Về tài liệu này}
 
 \begin{itemize}
-  \item Phiên bản 1.0, cập nhật ngày 02/11/2026. Phiên bản phần mềm, thông tin chứng chỉ và link được kiểm với nguồn chính thức vào ngày này.
-  \item Kiến thức kỹ thuật được đối chiếu với docs, spec và release notes chính thức của từng dự án và nhà cung cấp, không dựa vào bài báo khoa học hay blog cá nhân.
+  \item Phiên bản 2.0 nháp, cập nhật ngày 06/11/2026. Phần I được viết lại thành tutorial thực hành ngày 06/11/2026, còn Phần II tới IV vẫn giữ nội dung bản 1.0, nên tên module trong mục lục có thể khác bản đồ lộ trình cho tới khi được viết lại. Chương capstone cũng vẫn ghi bốn mốc của bản 1.0. Giờ trong bảng module là số của bản 2.0. Tiêu đề giờ, khung và mục \textit{Lướt được} của các chương M4 đến M13 vẫn theo bản 1.0.
+  \item Phiên bản phần mềm, thông tin chứng chỉ và link của bản 1.0 được kiểm với nguồn chính thức ngày 02/11/2026.
+  \item Kiến thức kỹ thuật được đối chiếu với docs, spec và release notes chính thức của từng dự án và nhà cung cấp. Bài viết của kỹ sư có tên tuổi và sách được trích khi chúng giúp nối với kinh nghiệm SWE, và luôn được ghi rõ là ``bài viết'' hay ``sách''.
   \item Thời lượng là ước tính cho phần lõi; tốc độ thật phụ thuộc nền tảng của bạn.
   \item Khi một link hỏng hoặc một hành vi thay đổi ở phiên bản mới, nguồn đúng luôn là docs của phiên bản bạn đang chạy.
 \end{itemize}

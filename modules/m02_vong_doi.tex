@@ -1,163 +1,1071 @@
-\modulechapter{2}{Vòng đời Data Engineering và kiến trúc dữ liệu}
-\moduleinfo{Cơ bản}{15 giờ}{Module 1 (có thể học song song với Module 3)}
+\modulechapter{2}{Vòng đời DE, yêu cầu và chọn kho}
+\moduleinfo{Cơ bản}{13 giờ}{Module 1; học song song với Module 3 được}
+% =====================================================================
+%  Bản viết lại theo kiểu tutorial cho Module 2, theo mẫu Module 3 bản thử.
+%  Mỗi khối code có dòng "% chạy: <id>"; output thật nằm sau "% kết quả: <id>".
+%  Khối "% chạy: <id> cần-lời-giải" chỉ chạy sau khi người học viết file của mình;
+%  lời giải tham khảo nằm ở solutions/m02/.
+%  Output chạy ngày 06/11/2026 bằng lakehouse/.venv/bin/python, Python 3.10.20,
+%  DuckDB 1.5.6, SQLite 3.50.4, thư mục ~/Desktop/DE; cùng output trên DuckDB 2.0.0, Python 3.11.15.
+% =====================================================================
 
-Trước khi học từng công cụ, bạn cần một bộ từ vựng chung để gọi tên từng phần của một nền tảng dữ liệu. Module này đi qua vòng đời dữ liệu từ hệ thống nguồn tới người dùng cuối, các kiểu xử lý batch và streaming, ETL và ELT, và ba kiểu kho: data warehouse, data lake, lakehouse. Bạn cũng đặt từng thành phần của stack tham chiếu (RustFS, Iceberg REST catalog, Spark, Airflow, Trino, Metabase, Kafka, Flink) vào đúng chỗ của nó. Học xong, bạn vẽ và giải thích được kiến trúc của lakehouse Olist mà các module sau sẽ xây.
-
-\section{Bạn sẽ học được}
-
-\begin{itemize}
-  \item Kể các thành phần của một kiến trúc dữ liệu lớn và đặt mỗi công cụ của stack tham chiếu vào một thành phần.
-  \item Phân biệt ETL với ELT theo nơi diễn ra biến đổi, và chọn được cách nào cho một tình huống.
-  \item So sánh data warehouse, data lake và lakehouse theo kiểu dữ liệu, schema-on-write hay schema-on-read, và chi phí lưu trữ.
-  \item Giải thích kiến trúc Lambda và Kappa, và nhược điểm chính của Lambda.
-  \item Giải thích medallion (bronze, silver, gold) và quan hệ của nó với tầng raw, staging/core, marts.
-  \item Mô tả vai trò của open table format như Apache Iceberg trong một lakehouse.
-\end{itemize}
-
-\section{Nội dung chính}
-
-\begin{enumerate}
-  \item \textbf{Thành phần của một kiến trúc dữ liệu.} Azure Architecture Center liệt kê: nguồn dữ liệu, lưu trữ (thường là data lake), xử lý batch, ingestion thời gian thực qua một bộ đệm thông điệp, xử lý stream, kho phân tích, phân tích và báo cáo, và orchestration để tự động hoá các luồng lặp lại. Một giải pháp không nhất thiết có đủ mọi thành phần (\href{https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures}{Azure: Big data architectures}). Trong lộ trình này, vòng đời được gọi gọn: nguồn → ingestion → lưu trữ → biến đổi → phục vụ, với orchestration, chất lượng dữ liệu và bảo mật chạy xuyên suốt.
-  \item \textbf{Hệ thống nguồn và tải phân tích.} Hệ OLTP phục vụ giao dịch thời gian thực; xử lý phân tích nên tách khỏi OLTP để không ảnh hưởng tải giao dịch (\href{https://docs.aws.amazon.com/whitepapers/latest/data-warehousing-on-aws/data-processing.html}{AWS: Data processing}). Đây là lý do có pipeline đưa dữ liệu từ nguồn vào kho phân tích.
-  \item \textbf{ETL và ELT.} ETL biến đổi dữ liệu trên một máy xử lý riêng trước khi nạp vào đích. ELT nạp nguyên trạng rồi biến đổi trong chính hệ đích, tận dụng sức tính của nó và giữ dữ liệu thô để biến đổi lại khi cần. AWS coi ELT là mặc định cho phân tích hiện đại, nhưng ETL vẫn hợp với cơ sở dữ liệu cũ có định dạng cố định hoặc tải ở biên, IoT, nơi dữ liệu cần lọc trước khi lên cloud (\href{https://aws.amazon.com/compare/the-difference-between-etl-and-elt/}{AWS: ETL vs ELT}).
-  \item \textbf{Data warehouse, data lake, lakehouse.} Warehouse giữ dữ liệu có cấu trúc, schema-on-write, phục vụ BI. Data lake giữ mọi kiểu dữ liệu trên lưu trữ rẻ, schema-on-read. Lakehouse ghép hai thứ: lưu trữ đối tượng giá rẻ cho mọi kiểu dữ liệu, cộng các chức năng quản lý như ACID transaction và schema enforcement, với lưu trữ tách khỏi tính toán (\href{https://cloud.google.com/discover/what-is-a-data-lakehouse}{Google Cloud: What is a data lakehouse}).
-  \item \textbf{Open table format.} Apache Iceberg là open table format cho tập dữ liệu phân tích lớn: nó thêm vào data lake các khả năng kiểu warehouse như time travel và tiến hoá schema, để nhiều engine mã nguồn mở cùng đọc ghi một bảng trên object storage (\href{https://iceberg.apache.org/docs/latest/}{Iceberg docs}; \href{https://cloud.google.com/discover/what-is-a-data-lakehouse}{Google Cloud}). Iceberg không phải engine: Spark, Trino, Flink, PyIceberg, DuckDB mới là thứ chạy truy vấn.
-  \item \textbf{Medallion.} Databricks mô tả medallion là một mẫu thiết kế dữ liệu, chia dữ liệu thành các lớp theo chất lượng: bronze chứa dữ liệu thô chưa kiểm, silver chứa dữ liệu đã kiểm, làm sạch và làm giàu, gold chứa các view tinh chỉnh phục vụ phân tích; ở gold, bạn mô hình hoá bằng dimensional model. Medallion là thực hành được khuyến nghị, không bắt buộc (\href{https://docs.databricks.com/aws/en/lakehouse/medallion}{Databricks: Medallion}). Lộ trình này gọi ba lớp là raw (bronze), staging/core (silver), marts (gold); tên staging và marts trùng với cách dbt chia dự án (\href{https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview}{dbt: How we structure our dbt projects}).
-  \item \textbf{Batch và streaming; Lambda và Kappa.} Batch xử lý dữ liệu theo lô định kỳ; streaming xử lý từng sự kiện khi nó tới, cho độ trễ thấp. Lambda chạy hai đường: batch layer (cold path) giữ toàn bộ dữ liệu thô và tính batch view; speed layer (hot path) phân tích thời gian thực, đánh đổi độ chính xác lấy độ trễ; serving layer phục vụ truy vấn. Nhược điểm chính là logic xử lý nằm ở hai nơi với hai framework. Kappa cho mọi dữ liệu đi một đường qua hệ xử lý stream, ghi vào một log phân tán; khi cần tính lại toàn bộ thì phát lại (replay) stream (\href{https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures}{Azure: Big data architectures}).
-  \item \textbf{Ai làm gì.} Data engineer xây và vận hành pipeline, lưu trữ và orchestration. Phần biến đổi dữ liệu trong kho thành mô hình sẵn cho phân tích, viết như phần mềm (có version control, test), thường được gọi là analytics engineering; DE Zoomcamp dành riêng một module cho nó. Data analyst và data scientist dùng dữ liệu ở tầng phục vụ.
-\end{enumerate}
-
-\section{Bắt đầu}
-
-\begin{itemize}
-  \item Đọc \href{https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures}{Azure: Big data architectures}, phần thành phần và phần Lambda, Kappa (1 giờ).
-  \item Đọc \href{https://cloud.google.com/discover/what-is-a-data-lakehouse}{Google Cloud: What is a data lakehouse}, bảng so sánh warehouse, lake, lakehouse (0,5 giờ).
-  \item Xem tuần đầu của khoá “Introduction to Data Engineering” trên Coursera ở chế độ audit (mục Khoá học miễn phí).
-\end{itemize}
-
-\section{Tài liệu chính thức}
-
-\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{1.8cm}@{}}
+\begin{xltabular}{\textwidth}{@{}P{3.4cm} L@{}}
 \toprule
-\thd{tài liệu} & \thd{nội dung cần đọc} & \thd{thời lượng} \\
+\thd{thẻ module} & \thd{nội dung} \\
 \midrule
 \endhead
 \bottomrule
 \endfoot
-\href{https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures}{Azure: Big data architectures} & thành phần; Lambda, Kappa; khi nào dùng kiến trúc dữ liệu lớn & 1,5 giờ \\
-\href{https://aws.amazon.com/compare/the-difference-between-etl-and-elt/}{AWS: ETL vs ELT} & định nghĩa, khác biệt, khi nào dùng & 0,5 giờ \\
-\href{https://docs.aws.amazon.com/whitepapers/latest/data-warehousing-on-aws/data-processing.html}{AWS: Data processing} & OLTP, OLAP và vì sao tách xử lý phân tích & 0,3 giờ \\
-\href{https://cloud.google.com/discover/what-is-a-data-lakehouse}{Google Cloud: What is a data lakehouse} & định nghĩa, bảng so sánh, các lớp của lakehouse & 0,5 giờ \\
-\href{https://docs.databricks.com/aws/en/lakehouse/medallion}{Databricks: Medallion architecture} & bronze, silver, gold; mô hình ở gold & 0,5 giờ \\
-\href{https://iceberg.apache.org/docs/latest/}{Apache Iceberg docs} & trang giới thiệu; danh sách tính năng & 0,5 giờ \\
-\href{https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview}{dbt: How we structure our dbt projects} & staging, intermediate, marts & 1 giờ \\
+Giờ & 13 giờ lõi, trong đó 3 giờ cho chọn kho ở Bài 2 và Lab 2.3; thêm khoảng 6 giờ nếu đọc hết phần Đọc thêm \\
+Dùng trong repo & sơ đồ ``Dữ liệu đi qua các namespace'' và lịch chạy trong \repo{README.md}; mục 1, 9, 10, 11 của \repo{docs/data-model.md}; mục 7 của \repo{docs/source-api-contract.md}; \repo{source\_\allowbreak{}sim/replay.py}; 9 file CSV trong \repo{lakehouse/source\_\allowbreak{}sim/data/}. Không cần service nào của repo chạy \\
+Phiên bản & DuckDB 1.5.6 và SQLite 3.50.4 trong \repo{lakehouse/.venv}, Python 3.10.20. Docs: \href{https://duckdb.org/docs/1.5/}{DuckDB 1.5}, \href{https://docs.python.org/3.10/library/sqlite3.html}{Python 3.10 sqlite3} \\
+Lướt được & Bài 6, vì repo \repo{lakehouse/} đã chia sẵn các tầng. Bài kiểm 15 phút, không mở tài liệu: ghi tầng medallion và kiểu ghi của 5 namespace \code{raw}, \code{staging}, \code{semantic}, \code{core}, \code{metadata}; kể 5 giai đoạn vòng đời, mỗi giai đoạn kèm phần repo làm việc đó; kể 6 undercurrent; viết một dòng cho mỗi khái niệm data warehouse, data lake, lakehouse; viết một câu cho Lambda, một câu cho Kappa, mỗi câu kèm lý do repo không cần nó. So với bảng ở Bài 6 và \repo{docs/data-model.md} mục 1; đúng 22 trên 26 ý là đạt \\
 \end{xltabular}
+% Kiểm: 26 ý = 5 namespace x 2 thuộc tính + 5 giai đoạn + 6 undercurrent + 3 khái niệm kho + 2 kiến trúc. Đáp án phần namespace ở lakehouse/docs/data-model.md dòng 9 tới 15 (cột lớp và ghi kiểu); phần còn lại ở bảng của Bài 6.
 
-\section{Khoá học miễn phí}
+Module 1 dạy bạn viết SQL. Module này dạy hai việc phải làm trước câu SQL đầu tiên của một yêu cầu: biến câu hỏi bằng lời thành một định nghĩa chỉ cho ra một con số, và chọn kho hợp với cách dữ liệu sẽ được đọc.
 
-\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{3.2cm}@{}}
-\toprule
-\thd{khoá học} & \thd{nội dung} & \thd{miễn phí phần nào} \\
-\midrule
-\endhead
-\bottomrule
-\endfoot
-\href{https://www.coursera.org/professional-certificates/data-engineering}{DeepLearning.AI Data Engineering Professional Certificate} (Coursera, với AWS) & 4 khoá: Introduction to Data Engineering (18 giờ); Source Systems, Data Ingestion, and Pipelines; Data Storage and Queries; Data Modeling, Transformation, and Serving. Lab xây dựng trên AWS. Module này chỉ cần khoá 1 & audit miễn phí nhưng không có chứng chỉ; chứng chỉ cần gói Coursera (\$49/tháng theo trang khoá) hoặc hỗ trợ tài chính \\
-\href{https://github.com/DataTalksClub/data-engineering-zoomcamp}{DE Zoomcamp} (DataTalksClub) & container và IaC, orchestration, data warehouse, analytics engineering, batch, streaming, dự án cuối. Module này chỉ cần đọc tổng quan các module & toàn bộ video, tài liệu, bài tập miễn phí; chứng chỉ chỉ cấp cho người hoàn thành dự án trong cohort trực tiếp (cohort kế tiếp bắt đầu 01/2027) \\
-\end{xltabular}
+Phần lớn giờ dành cho hai việc đó, ở Bài 1 và Bài 2. Các bài còn lại gắn tên cho những thứ có sẵn trong repo \repo{lakehouse}: hệ thống nguồn, vai trò trong team, ETL và ELT, các tầng dữ liệu. Repo \repo{lakehouse/} đã chia sẵn các tầng, nên Bài 6 chỉ cần lướt.
 
-\section{Lab thực hành}
+\begin{ghichu}
+\textbf{Cách chạy code trong module này.}
+\begin{itemize}
+  \item Lời giải mẫu nằm trong \repo{solutions/m02/}. Đọc sau khi tự làm, để đối chiếu.
+  \item Mọi khối code là lệnh bash, chạy từ thư mục cha của \repo{lakehouse/} bằng \repo{lakehouse/\allowbreak{}.venv/\allowbreak{}bin/\allowbreak{}python}. Venv này có DuckDB 1.5.6, và Python 3.10.20 của nó có sẵn SQLite 3.50.4 cùng phần tìm theo chữ FTS5.
+  \item Lộ trình ghim DuckDB 2.0.0, nhưng bản này cần Python 3.11 trở lên, nên output trong module là của 1.5.6. Code chỉ dùng API có ở cả hai bản: lấy một dòng bằng \code{fetchall()[0]}, vì DuckDB 2.0 bỏ \code{fetchone()} trên relation.
+  % Nguồn: https://pypi.org/pypi/duckdb/2.0.0/json (requires_python >=3.11.0); chạy thử của tác giả trên DuckDB 2.0.0
+  \item Lab ghi file vào thư mục \code{lab\_\allowbreak{}m02/} và không ghi gì vào \repo{lakehouse/}. Khối của Bài 3 import code của repo, nên nó chạy Python với cờ \code{-B} để không sinh file \code{.pyc} trong repo.
+  \item Phần ``Kết quả'' dưới mỗi khối là output thật, chạy ngày 06/11/2026. Thời gian đo ở Bài 2 đổi theo máy, nên khối đó chỉ in bậc của tỉ số và ghi thời gian ra file \code{lab\_\allowbreak{}m02/bai2\_\allowbreak{}thoi\_\allowbreak{}gian.txt}.
+\end{itemize}
+\end{ghichu}
 
-\subsection{Lab 2.1: Bản đồ vòng đời của lakehouse Olist}
+% =====================================================================
+\section{Vấn đề thật: 746 hay 673 đơn, cùng một câu hỏi}
 
-\begin{enumerate}
-  \item Liệt kê các bảng CSV của Olist và giả định chúng đến từ một hệ OLTP thương mại điện tử.
-  \item Vẽ sơ đồ (giấy, draw.io hay Excalidraw đều được) từ nguồn tới Metabase, gồm: ingestion batch, ingestion stream qua Kafka, object storage RustFS, Iceberg REST catalog, Spark và Flink để biến đổi, Trino để truy vấn, Metabase để báo cáo, Airflow để orchestration.
-  \item Lập bảng: mỗi công cụ một dòng, cột là thành phần theo Azure Architecture Center, tầng medallion nó đọc và ghi, batch hay stream.
-  \item Đánh dấu các mối quan tâm xuyên suốt sơ đồ chưa có: chất lượng dữ liệu, lineage, bảo mật, giám sát.
-\end{enumerate}
+Một BA, tức người phân tích nghiệp vụ, nhắn: ``Trong các đơn mua tháng 2/2017, bao nhiêu đơn giao tới khách sau 01/03/2017?'' Câu hỏi nghe rõ ràng, và bạn viết SQL trong hai phút. Đồng nghiệp ngồi cạnh cũng viết, và ra số khác.
 
-\hoanthanh{bạn có một sơ đồ và một bảng, mọi công cụ của stack tham chiếu xuất hiện đúng một lần trong bảng, và mỗi tầng raw, staging/core, marts có ít nhất một công cụ ghi vào.}
-
-\subsection{Lab 2.2: Cùng một kết quả bằng ETL và bằng ELT}
-
-\begin{enumerate}
-  \item ETL: viết một script Python dùng DuckDB làm bộ xử lý bên ngoài, đọc \code{olist\_\allowbreak{}orders\_\allowbreak{}dataset.csv} và \code{olist\_\allowbreak{}order\_\allowbreak{}items\_\allowbreak{}dataset.csv}, tính doanh thu theo ngày, rồi chỉ ghi kết quả ra \code{marts/daily\_\allowbreak{}revenue.parquet}.
-  \item ELT: nạp nguyên hai CSV vào một file DuckDB làm “kho” (\code{raw\_\allowbreak{}orders}, \code{raw\_\allowbreak{}items}), rồi tạo bảng doanh thu theo ngày bằng SQL ngay trong kho.
+% chạy: VD
 \begin{codeblock}
-CREATE TABLE raw_orders AS SELECT * FROM read_csv('olist/olist_orders_dataset.csv');
-CREATE TABLE raw_items  AS SELECT * FROM read_csv('olist/olist_order_items_dataset.csv');
-CREATE TABLE daily_revenue AS
-SELECT CAST(o.order_purchase_timestamp AS DATE) AS order_date,
-       sum(i.price) AS revenue
-FROM raw_orders o JOIN raw_items i USING (order_id)
-WHERE o.order_status NOT IN ('canceled', 'unavailable')
-GROUP BY ALL;
+lakehouse/.venv/bin/python - <<'EOF'
+import duckdb
+D = 'lakehouse/source_sim/data/'
+con = duckdb.connect()
+con.sql(f"CREATE VIEW orders AS SELECT * FROM '{D}olist_orders_dataset.csv'")
+one = lambda q: con.sql(q).fetchall()[0][0]
+thang_2 = """FROM orders WHERE order_purchase_timestamp >= TIMESTAMP '2017-02-01'
+                         AND order_purchase_timestamp <  TIMESTAMP '2017-03-01'"""
+print('đơn mua trong tháng 2/2017:', one(f'SELECT count(*) {thang_2}'))
+for moc in ['2017-03-01', '2017-03-02']:
+    n = one(f"""SELECT count(*) {thang_2}
+                AND order_delivered_customer_date >= TIMESTAMP '{moc}'""")
+    print(f'  giao tới khách từ 00:00 ngày {moc}:', n)
+EOF
 \end{codeblock}
-  \item Đổi định nghĩa doanh thu (cộng thêm \code{freight\_\allowbreak{}value}). Ghi lại cách nào phải đọc lại nguồn và cách nào chỉ cần chạy lại SQL trên dữ liệu thô đã có.
-\end{enumerate}
+\textit{Kết quả:}
+% kết quả: VD
+\begin{codeblock}
+đơn mua trong tháng 2/2017: 1780
+  giao tới khách từ 00:00 ngày 2017-03-01: 746
+  giao tới khách từ 00:00 ngày 2017-03-02: 673
+\end{codeblock}
 
-\hoanthanh{hai cách cho cùng bảng doanh thu theo ngày (so bằng \code{EXCEPT} ra 0 dòng), và bạn viết được ba câu giải thích nơi biến đổi diễn ra trong mỗi cách và vì sao ELT dễ đổi định nghĩa hơn.}
+Bạn đọc ``sau 01/03'' là từ 00:00 ngày 01/03, nên ra 746. Đồng nghiệp đọc là sau khi hết ngày 01/03, nên ra 673. Cả hai câu SQL đều đúng với cách hiểu của người viết. Không có lỗi hay cảnh báo nào cho biết hai người đang trả lời hai câu hỏi khác nhau.
 
-\subsection{Lab 2.3: Ba tầng raw, staging, marts trên file}
+Lab 2.1 tìm thêm các cách hiểu khác, như tính cả đơn chưa giao, hay đọc mốc theo giờ UTC. Repo \repo{lakehouse} cũng chưa có định nghĩa metric nào cho năm câu hỏi Gold ở \repo{docs/data-model.md} mục 11, nên câu hỏi Gold nào cũng có thể gặp chuyện này.
+% Nguồn: lakehouse/docs/data-model.md dòng 372 tới 384: mục 11 chỉ liệt kê câu hỏi và cột nguồn, chưa có định nghĩa metric.
 
-\begin{enumerate}
-  \item \code{raw/}: chép nguyên CSV, không sửa.
-  \item \code{staging/}: với DuckDB, đọc CSV, ép kiểu ngày giờ, đổi tên cột nếu cần, khử trùng theo khoá logic, ghi Parquet bằng \code{COPY ... TO 'staging/orders.parquet' (FORMAT parquet)}.
-  \item \code{marts/}: tạo một bảng tổng hợp doanh thu theo tháng và bang từ Parquet ở staging.
-  \item Viết ba câu kiểm: số dòng staging bằng số khoá logic ở raw; không có \code{order\_\allowbreak{}id} NULL; tổng doanh thu ở marts bằng tổng tính trực tiếp từ staging.
-\end{enumerate}
+Module này trả lời hai câu hỏi. Viết yêu cầu thế nào để hai người đọc tính ra cùng một con số? Và khi đã biết dữ liệu sẽ được đọc ra sao, chọn kho nào để việc đọc đó nhanh?
 
-\hoanthanh{ba thư mục có dữ liệu, ba câu kiểm đều đạt, và một đoạn ngắn ánh xạ mỗi thư mục với bronze, silver, gold theo định nghĩa của Databricks.}
+% =====================================================================
+\section{Từ SWE sang DE}
 
-\section{Kế hoạch theo tuần}
+Bảng dưới nối thứ bạn đã biết với tên gọi trong data engineering, theo thứ tự bài học. Cột cuối là chỗ so sánh gãy, và bài học ghi ở cuối ô xử lý chỗ gãy đó trên dữ liệu thật.
 
-\begin{xltabular}{\textwidth}{@{}P{1.4cm} L P{1.6cm}@{}}
+\begin{xltabular}{\textwidth}{@{}P{3.2cm} P{2.8cm} L L@{}}
 \toprule
-\thd{tuần} & \thd{việc} & \thd{giờ} \\
+\thd{bạn đã biết (SWE)} & \thd{trong DE gọi là} & \thd{giống ở đâu} & \thd{khác ở đâu} \\
 \midrule
 \endhead
 \bottomrule
 \endfoot
-1 & Azure Big data architectures; AWS ETL vs ELT, Data processing; Google lakehouse; tuần đầu khoá Coursera (audit); Lab 2.1, Lab 2.2 & 10 \\
-2 & Databricks medallion; Iceberg docs; dbt How we structure; Lab 2.3; thử thách kỹ năng & 5 \\
-thêm & phần còn lại khoá 1 Coursera; đọc tổng quan module DE Zoomcamp & 10 tới 15 \\
+user story có tiêu chí chấp nhận & định nghĩa metric & viết trước khi code, kiểm được bằng ví dụ & hai người đọc phải tính ra cùng một con số trên dữ liệu còn đổi; Bài 1 \\
+SLO độ trễ p99 của API & độ tươi của bảng & một con số cam kết, đo liên tục, có cảnh báo & đo bằng tuổi của dữ liệu mới nhất, không đo thời gian trả lời; pipeline trễ không báo lỗi nào; Bài 1 \\
+đọc từ read replica còn trễ & số liệu chưa chốt & đọc sớm thì thấy giá trị cũ & trễ có thể tới hàng tháng, nên con số cần một ngày chốt đi kèm; Bài 1 \\
+chọn database cho microservice theo query pattern & chọn kho theo kiểu truy cập & hỏi dữ liệu được đọc thế nào trước khi chọn kho & cùng dữ liệu nằm ở hai kho, và truy vấn phân tích quét cả cột của cả bảng; Bài 2 \\
+database của chính service bạn & hệ thống nguồn & dữ liệu do app sinh ra & bạn không sở hữu nó; schema và nhãn thời gian có thể đổi mà không báo; Bài 3 \\
+backend engineer & data engineer, analytics engineer & viết code, test, review, deploy & sản phẩm là bảng đúng và đúng giờ, người dùng là người phân tích; Bài 4 \\
+event sourcing & ELT & giữ bản gốc để dựng lại khi luật đổi & bản gốc do team khác thiết kế; ETL chỉ giữ kết quả nên đổi luật là phải đọc lại nguồn; Bài 5 \\
+tầng adapter, domain, read model & tầng raw, staging, core, marts & mỗi tầng một trách nhiệm, phụ thuộc một chiều & tầng sau luôn dựng lại được từ tầng trước; Bài 6 \\
+ghi đôi vào database và cache & kiến trúc Lambda & một đường nhanh, một đường chắc & logic nằm ở hai nơi, và hai đường phải ra cùng số; Bài 6 \\
+team sở hữu một service & sản phẩm dữ liệu (data product) & một team sở hữu, có hợp đồng và người dùng & người dùng là người phân tích, và mọi domain dùng chung nền tảng và luật quản trị; Bài 7 \\
+dùng thư viện hay tự viết & tự viết hay mua công cụ dữ liệu & cùng phép tính chi phí sở hữu & phần đắt là giữ connector chạy đúng khi nguồn đổi; Bài 8 \\
 \end{xltabular}
+
+\textbf{Thói quen SWE gây hại nhất ở module này: nhận câu hỏi bằng lời rồi viết SQL ngay, như nhận ticket rồi code ngay.} Câu SQL sai định nghĩa vẫn chạy, vẫn trả về một con số trông hợp lý, và không test nào đỏ.
+
+% =====================================================================
+\section{Bạn sẽ làm được}
+
+\begin{itemize}
+  \item Liệt kê mọi cách hiểu của một câu hỏi có mốc thời gian, đếm từng cách, rồi viết lại câu hỏi để chỉ còn một đáp án.
+  \item Viết thẻ yêu cầu gồm người dùng, grain, định nghĩa metric, mốc cắt và độ tươi, đủ rõ để người khác tính ra cùng con số.
+  \item Chọn kho cho năm việc của Olist theo kiểu truy cập, mỗi lựa chọn có một số đo làm bằng chứng.
+  \item Gắn đúng tên chuẩn cho các phần của repo trong 15 phút: tầng medallion, kiểu ghi, giai đoạn vòng đời, undercurrent, Lambda và Kappa.
+  \item Quyết định ETL hay ELT, batch hay streaming, tự viết hay mua cho một nhu cầu, kèm lý do kiểm được.
+\end{itemize}
+
+% =====================================================================
+\section{Bài 1: Từ câu hỏi nghiệp vụ tới định nghĩa metric}
+
+\textbf{Vấn đề.} BA hỏi ``doanh thu tháng 2/2017''. Có ít nhất sáu cách tính hợp lý, mỗi cách ra một số khác, và số lớn nhất hơn số nhỏ nhất 47\%. Nếu yêu cầu không nói cách nào, bạn chọn thay BA mà không ai biết.
+
+\textbf{Giải thích.} Bên SWE, bạn không code một user story khi chưa có tiêu chí chấp nhận. Trong DE, tiêu chí chấp nhận của một câu hỏi là một \textit{thẻ yêu cầu}: một trang đặc tả ngắn có năm phần. Thiếu phần nào thì câu SQL phải tự đoán phần đó.
+
+\begin{xltabular}{\textwidth}{@{}P{2.6cm} P{4.2cm} L@{}}
+\toprule
+\thd{phần} & \thd{trả lời câu hỏi} & \thd{ví dụ cho doanh thu tháng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+người dùng & ai đọc, để quyết định gì, xem lúc nào & BA xem dashboard mỗi sáng thứ Hai để chọn danh mục chạy khuyến mãi \\
+grain & một dòng của kết quả là gì & một dòng mỗi tháng đặt hàng và mỗi danh mục \\
+định nghĩa metric & công thức, cột nguồn, điều kiện lọc, đơn vị & tổng \code{price} của dòng hàng, không cộng \code{freight\_\allowbreak{}value}, bỏ đơn \code{canceled} và \code{unavailable}, đơn vị BRL \\
+mốc cắt & cột thời gian nào, khoảng nào, múi giờ nào, chốt số vào ngày nào & \code{order\_\allowbreak{}purchase\_\allowbreak{}timestamp} từ 00:00 ngày 01/02 tới trước 00:00 ngày 01/03, giờ São Paulo; số của tháng chốt vào ngày 01 của tháng thứ hai sau đó \\
+độ tươi & dữ liệu mới nhất được phép cũ bao lâu khi người dùng mở & lúc 08:00 thứ Hai, dữ liệu đã có tới 00:00 cùng ngày \\
+\end{xltabular}
+
+Grain là câu trả lời cho ``một dòng là gì''. Module 3 dạy grain kỹ; ở đây chỉ cần viết nó ra trước khi viết SQL.
+
+Mốc cắt gồm hai thứ. Thứ nhất là một \textit{khoảng nửa mở} (half-open interval): lấy từ mốc đầu, tới trước mốc cuối, như \code{range()} của Python. Viết như vậy thì hai tháng liền nhau không chồng lên nhau và không hở. Thứ hai là \textit{ngày chốt} (as-of date): ngày bạn tính con số. Dữ liệu của một tháng đã qua vẫn còn tới thêm, nên cùng một câu hỏi tính vào hai ngày khác nhau ra hai số khác nhau.
+
+Độ tươi (freshness) là tuổi của dữ liệu mới nhất mà người dùng thấy. Yêu cầu độ tươi phải so với lịch chạy của pipeline. Repo chạy Silver 6 lần mỗi ngày, nên dữ liệu Silver có thể trễ tới khoảng 4 giờ; một yêu cầu ``trễ không quá 1 giờ'' sẽ không đạt nếu chưa đổi lịch.
+% Nguồn: lakehouse/airflow/README.md dòng 186 (cron hiện tại: 00, 04, ..., 20 giờ UTC; "dữ liệu Silver trễ tới khoảng 4 giờ")
+
+\begin{ghichu}
+\textbf{So với SWE.} Thẻ yêu cầu giống user story kèm tiêu chí chấp nhận viết theo kiểu Given-When-Then. Martin Fowler mô tả Given-When-Then là cách đặc tả hành vi của hệ thống bằng ví dụ. Câu kiểm của thẻ, như ``tháng 2/2017, chốt ngày 01/04/2017, ra 244.709,43 BRL'', chính là ví dụ đó.
+% Nguồn: https://martinfowler.com/bliki/GivenWhenThen.html
+% Kiểm: DuckDB 1.5.6 ngày 06/11/2026: sum(price) của đơn mua tháng 2/2017, bỏ canceled và unavailable, thêm điều kiện coalesce(order_approved_at, order_purchase_timestamp) < TIMESTAMP '2017-04-01', ra 244709.43; bỏ điều kiện đó ra 244959.35. Mô phỏng bằng source_sim.replay tại 2017-04-01 00:00 cũng ra 244709.43.
+Độ tươi giống SLO độ trễ. Sách SRE của Google cho ví dụ ``99\% of Get RPC calls will complete in less than 100 ms''. SRE Workbook viết SLO độ tươi của pipeline theo cùng kiểu, ví dụ ``The oldest data is no older than Y''. Số chưa chốt thì giống đọc từ read replica còn trễ: đọc sớm thì thấy giá trị cũ.
+% Nguồn: https://sre.google/sre-book/service-level-objectives/ ; https://sre.google/workbook/data-processing/
+
+\textbf{Chỗ so sánh gãy.} Tiêu chí chấp nhận, kể cả khi đã thành test tự động, chạy trên dữ liệu mẫu cố định nên lần nào cũng ra cùng kết quả. Định nghĩa metric phải cho cùng một số mỗi lần chạy, trên dữ liệu vẫn còn đổi, nên thẻ phải có ngày chốt. Replica trễ vì chưa chép xong những gì đã xảy ra, còn số của tháng 2/2017 đổi vì sự việc chưa xảy ra: tới 19/09/2017 vẫn còn đơn tháng 2 được giao. Độ tươi đo bằng tuổi của dữ liệu, không đo thời gian trả lời: khi pipeline chạy trễ, dashboard vẫn mở nhanh và không có lỗi nào, chỉ có con số là cũ.
+\end{ghichu}
+
+\subsection{Làm thử}
+
+Khối dưới tính ``doanh thu tháng 2/2017'' theo sáu cách, rồi đếm số đơn tháng 2 đã giao nếu bạn tính vào năm ngày khác nhau.
+
+% chạy: A
+\begin{codeblock}
+lakehouse/.venv/bin/python - <<'EOF'
+import duckdb
+D = 'lakehouse/source_sim/data/'
+con = duckdb.connect()
+for t in ['orders', 'order_items', 'order_payments']:
+    con.sql(f"CREATE VIEW {t} AS SELECT * FROM '{D}olist_{t}_dataset.csv'")
+one = lambda q: con.sql(q).fetchall()[0][0]
+thang_2 = lambda c: f"{c} >= TIMESTAMP '2017-02-01' AND {c} < TIMESTAMP '2017-03-01'"
+mua = thang_2('order_purchase_timestamp')
+hang = """SELECT o.*, CAST(i.price AS DECIMAL(14,2)) AS price,
+                 CAST(i.freight_value AS DECIMAL(14,2)) AS freight
+          FROM orders o JOIN order_items i USING (order_id)"""
+cach = {
+  'giá hàng, mọi trạng thái': f"SELECT sum(price) FROM ({hang}) WHERE {mua}",
+  'giá hàng, bỏ canceled và unavailable': f"""SELECT sum(price) FROM ({hang})
+      WHERE {mua} AND order_status NOT IN ('canceled', 'unavailable')""",
+  'giá hàng, chỉ delivered': f"""SELECT sum(price) FROM ({hang})
+      WHERE {mua} AND order_status = 'delivered'""",
+  'giá hàng cộng phí vận chuyển': f"""SELECT sum(price + freight) FROM ({hang})
+      WHERE {mua}""",
+  'tiền khách trả, bảng order_payments': f"""SELECT
+      sum(CAST(p.payment_value AS DECIMAL(14,2)))
+      FROM orders o JOIN order_payments p USING (order_id) WHERE {mua}""",
+  'giá hàng, theo ngày giao tới khách': f"""SELECT sum(price) FROM ({hang})
+      WHERE {thang_2('order_delivered_customer_date')}""",
+}
+print('Doanh thu tháng 2/2017, BRL:')
+for ten, q in cach.items():
+    print(f'{one(q):>11}  {ten}')
+print('Đơn mua tháng 2/2017, hai cách viết mốc cắt:')
+print('  nửa mở [01/02, 01/03):', one(f'SELECT count(*) FROM orders WHERE {mua}'))
+print("  BETWEEN DATE '2017-02-01' AND DATE '2017-02-28':", one(
+    """SELECT count(*) FROM orders WHERE order_purchase_timestamp
+       BETWEEN DATE '2017-02-01' AND DATE '2017-02-28'"""))
+print('Đơn mua tháng 2/2017 đã giao tới khách, đếm vào lúc:')
+for ngay in ['2017-03-01', '2017-03-15', '2017-04-01', '2017-07-01', '2018-12-31']:
+    n = one(f"""SELECT count(*) FROM orders WHERE {mua}
+                AND order_delivered_customer_date < TIMESTAMP '{ngay}'""")
+    print(f'  00:00 ngày {ngay}: {n}')
+EOF
+\end{codeblock}
+\textit{Kết quả:}
+% kết quả: A
+\begin{codeblock}
+Doanh thu tháng 2/2017, BRL:
+  247303.02  giá hàng, mọi trạng thái
+  244959.35  giá hàng, bỏ canceled và unavailable
+  234223.40  giá hàng, chỉ delivered
+  286280.62  giá hàng cộng phí vận chuyển
+  291908.01  tiền khách trả, bảng order_payments
+  198909.29  giá hàng, theo ngày giao tới khách
+Đơn mua tháng 2/2017, hai cách viết mốc cắt:
+  nửa mở [01/02, 01/03): 1780
+  BETWEEN DATE '2017-02-01' AND DATE '2017-02-28': 1725
+Đơn mua tháng 2/2017 đã giao tới khách, đếm vào lúc:
+  00:00 ngày 2017-03-01: 907
+  00:00 ngày 2017-03-15: 1524
+  00:00 ngày 2017-04-01: 1633
+  00:00 ngày 2017-07-01: 1651
+  00:00 ngày 2018-12-31: 1653
+\end{codeblock}
+
+Sáu con số đi từ 198.909,29 tới 291.908,01 BRL, và mỗi số đúng với một cách hiểu chữ ``doanh thu''. Tiền khách trả còn lớn hơn giá hàng cộng phí vận chuyển 5.627,39 BRL. Phần lớn khoản chênh, 5.567,14 BRL, là tiền của 47 đơn tháng 2 có thanh toán nhưng không có dòng hàng nào, gần hết là đơn \code{unavailable}; 60,25 BRL còn lại là chênh lệch bên trong 14 đơn. Thanh toán là một quy trình nghiệp vụ riêng, nên Module 3 tách nó thành một fact riêng.
+% Kiểm: DuckDB 1.5.6 ngày 06/11/2026, đơn mua tháng 2/2017: 47 đơn, với 50 dòng thanh toán, có thanh toán mà không có dòng hàng nào (45 unavailable, 2 canceled), tổng 5567.14; 14 đơn có dòng hàng mà tổng thanh toán khác tổng price cộng freight_value, lệch tổng 60.25. Trên toàn bộ dữ liệu có 775 đơn không có dòng hàng (lakehouse/docs/data-model.md mục 9 hàng 5).
+
+Phần cuối cho thấy vì sao thẻ cần ngày chốt. Nếu tính vào 00:00 ngày 01/03, chỉ có 907 đơn tháng 2 đã giao. Tới 15/03 là 1.524, và con số chỉ đứng yên ở 1.653 từ 19/09/2017, ngày đơn tháng 2 cuối cùng được giao. Theo luật phát lại của mock \repo{source\_\allowbreak{}sim}, version \code{delivered} của một đơn chỉ hiện ra khi đồng hồ mô phỏng tới ngày giao, nên một dashboard chạy lúc 00:00 ngày 15/03, chưa tính độ trễ của pipeline, thấy đúng 1.524.
+% Nguồn: lakehouse/source_sim/replay.py dòng 59 tới 73 (mỗi mốc vòng đời là một version, updated_at là chính mốc đó)
+% Kiểm: 291908.01 - 286280.62 = 5627.39; 291908.01 / 198909.29 = 1.4675, tức hơn 47%.
+% Kiểm: DuckDB 1.5.6 ngày 06/11/2026, đơn tháng 2/2017 đã giao trước các mốc: 15/03 08:00 có 1525, 01/08 có 1651, 19/09 00:00 có 1652, 20/09 có 1653; lần giao cuối lúc 2017-09-19 14:36:39.
+
+Doanh thu cũng đổi theo ngày chốt, vì dòng hàng chỉ hiện ra khi đơn được duyệt. Một đơn mua ngày 03/02/2017 tới 04/04/2017 mới được duyệt, nên số chốt ngày 01/04/2017 là 244.709,43 BRL, còn khối trên tính trên toàn bộ dữ liệu ra 244.959,35 BRL. Khoản chênh đúng bằng 249,92 BRL của đơn đó.
+% Nguồn: lakehouse/source_sim/replay.py dòng 86 tới 88 (dòng hàng có updated_at là order_approved_at, không có thì order_purchase_timestamp); lakehouse/source_sim/app.py dòng 127 tới 136 (API chỉ trả version có updated_at <= giờ mô phỏng)
+% Kiểm: đơn 2e5dc86c8c4aa663549caf5e31de840d mua 2017-02-03 00:04:49, duyệt 2017-04-04 10:56:48, trạng thái processing, tổng price 249.92; 244959.35 - 244709.43 = 249.92.
+
+\begin{luuy}
+\textbf{Bẫy thường gặp.}
+\begin{itemize}
+  \item \textbf{Viết mốc cắt bằng \code{BETWEEN} với ngày.} Với cột timestamp, \code{BETWEEN DATE '2017-02-01' AND DATE '2017-02-28'} dừng ở 00:00 ngày 28/02, nên mất cả ngày cuối tháng: 1.725 đơn thay vì 1.780. Luôn dùng khoảng nửa mở.
+  \item \textbf{Để định nghĩa nằm trong câu SQL của từng người.} Hai người viết hai câu là hai định nghĩa. Viết định nghĩa một lần trong thẻ, rồi một lần trong bảng Gold mà mọi người cùng đọc, như Module 3 và Module 7 làm.
+  \item \textbf{Hứa độ tươi chặt hơn lịch pipeline.} Với Silver chạy mỗi 4 giờ, lời hứa ``trễ dưới 1 giờ'' chỉ đúng vào vài thời điểm trong ngày.
+  \item \textbf{Hứa ``đủ đơn'' rồi tưởng là đủ doanh thu.} Dòng hàng chỉ hiện ra khi đơn được duyệt. Theo luật phát lại, lúc 08:00 ngày 25/11/2017 dashboard chỉ thấy doanh thu ngày 24/11 của 1.029 đơn, 130.347,74 BRL; số cuối cùng là 1.166 đơn, 152.653,74 BRL.
+  % Kiểm: mô phỏng bằng source_sim.replay ngày 06/11/2026, Python 3.10.20: đơn mua ngày 24/11/2017, bỏ canceled và unavailable, giờ mô phỏng 2017-11-25 08:00 thấy 1029 đơn có dòng hàng, tổng price 130347.74; trên toàn bộ dữ liệu 1166 đơn, 152653.74.
+\end{itemize}
+\end{luuy}
+
+% =====================================================================
+\section{Bài 2: Chọn kho theo kiểu truy cập}
+
+\textbf{Vấn đề.} Olist cần hai việc trên cùng bảng \code{orders}. API của app tra một đơn theo \code{order\_\allowbreak{}id}, nhiều lần mỗi giây. Dashboard đếm đơn và số ngày giao trung bình theo tháng, trên cả 99.441 đơn. Chọn một kho cho cả hai thì một việc sẽ chậm, và bài này đo xem chậm bao nhiêu.
+
+\textbf{Giải thích.} Bên SWE, bạn đã chọn database cho từng microservice theo cách nó được đọc. DE làm đúng việc đó với năm \textit{kiểu truy cập} (access pattern) hay gặp:
+
+\begin{xltabular}{\textwidth}{@{}P{2.6cm} P{3.6cm} L P{3.2cm}@{}}
+\toprule
+\thd{kiểu truy cập} & \thd{ví dụ Olist} & \thd{thứ làm nó nhanh} & \thd{kho hay dùng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+tra theo khoá & API tra một đơn theo \code{order\_\allowbreak{}id} & index B-tree hoặc bảng băm dẫn thẳng tới dòng & PostgreSQL, SQLite \\
+quét phân tích & đếm đơn theo tháng trên mọi đơn & lưu theo cột, nén, tính trên từng lô giá trị & DuckDB, Trino trên Iceberg, BigQuery \\
+tìm theo chữ & review có cụm ``não recebi'' & \textit{index đảo ngược} (inverted index): mỗi từ trỏ tới các dòng chứa nó & SQLite FTS5, OpenSearch \\
+tìm gần nhất theo vector & review giống nghĩa một câu cho trước & index HNSW hoặc IVF trên vector & pgvector; nhánh T3 thử kiểu truy cập này \\
+chuỗi thời gian & độ tươi của từng bảng, đo mỗi 15 phút & ghi nối đuôi theo thời gian, đọc theo khoảng & Prometheus \\
+\end{xltabular}
+% Nguồn: https://www.sqlite.org/fts5.html ; https://github.com/pgvector/pgvector (README: HNSW, IVFFlat) ; https://prometheus.io/docs/introduction/overview/ ("stores its metrics as time series data")
+
+Hai kiểu đầu là hai cách xếp dữ liệu. \textit{Kho theo dòng} (row store) để mọi cột của một dòng nằm cạnh nhau. Tra một đơn qua index B-tree chỉ đọc vài trang, và có ngay đủ cả dòng. \textit{Kho theo cột} (column store) để mọi giá trị của một cột nằm cạnh nhau. Câu gộp chỉ đọc đúng những cột nó cần và tính trên cả lô giá trị một lần, nhưng muốn lấy đủ một dòng thì phải ghép từ mọi cột.
+
+\begin{ghichu}
+\textbf{So với SWE.} Mẫu ``database per service'' trên microservices.io viết: ``Different services have different data storage requirements. For some services, a relational database is the best choice.'' Chọn kho trong DE dùng đúng phép suy luận đó: hỏi dữ liệu được đọc thế nào trước, rồi mới chọn kho.
+% Nguồn: https://microservices.io/patterns/data/database-per-service.html
+
+\textbf{Chỗ so sánh gãy.} Với microservice, mỗi service giữ dữ liệu của mình và tự quản các bản sao như cache. Trong DE, dữ liệu đơn hàng nằm ở hai kho: database của app cho việc tra, và lakehouse cho việc quét, nơi pipeline của team dữ liệu chép sang theo lịch. Engine phân tích còn có chi phí cố định cho mỗi câu lệnh: trên máy viết bài, \code{SELECT 1} mất khoảng 33 µs với DuckDB và dưới 1 µs với SQLite. Vì vậy hàng nghìn câu nhỏ là cách dùng sai kho theo cột.
+% Kiểm: ngày 06/11/2026, DuckDB 1.5.6, Python 3.10.20, Apple M5: 1.000 lần execute('SELECT 1').fetchall(), trung vị 7 lần đo: DuckDB 32,8 µs mỗi câu, SQLite 0,4 µs; chạy lại cùng ngày: DuckDB 33,4 µs, SQLite 0,8 µs.
+\end{ghichu}
+
+\begin{ghichu}
+\textbf{Ba đề thi chấm đúng kỹ năng này,} dù tên dịch vụ khác nhau theo cloud. AWS DEA-C01 có Task 2.1 ``Choose a data store'' trong Domain 2, phần chiếm 26\% điểm; Skill 2.1.2 đòi cấu hình dịch vụ lưu trữ phù hợp ``for specific access patterns and requirements''. Hướng dẫn 4.2 của Google Professional Data Engineer mở mục 3.1 ``Selecting storage systems'' bằng ý ``Analyzing data access patterns''. Microsoft DP-700 mở nhóm kỹ năng ``Ingest and transform batch data'' bằng ``Choose an appropriate data store''.
+% Nguồn: https://docs.aws.amazon.com/aws-certification/latest/data-engineer-associate-01/data-engineer-associate-01.html (Domain 2, 26%) và trang ...-domain2.html (Task 2.1, Skill 2.1.2); https://services.google.com/fh/files/misc/professional_data_engineer_exam_guide_english.pdf (tiêu đề PDF "v4.2 Professional Data Engineer Exam Guide", mục 3.1)
+% Nguồn: https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/dp-700 (updated_at 2026-11-05). Kiểm: mở ba trang ngày 06/11/2026 và chép đúng chữ; Skill 2.1.2 viết "Configure the appropriate storage services for specific access patterns and requirements".
+\end{ghichu}
+
+\subsection{Làm thử}
+
+Khối dưới nạp cùng file \code{orders} vào SQLite, có index B-tree trên \code{order\_\allowbreak{}id}, và vào DuckDB, không có index. Nó in plan của mỗi engine, kiểm hai kho cho cùng kết quả, rồi đo hai việc: tra 1.000 \code{order\_\allowbreak{}id}, và gộp cả bảng theo tháng. Mỗi việc chạy nóng một lần, rồi đo xen kẽ hai kho 7 lần và lấy trung vị. DuckDB chỉ dùng 1 luồng, như SQLite, để số luồng không làm lệch phép so. Hai kho vẫn khác nhau ở index, ở kiểu dữ liệu của cột thời gian và ở cách chạy câu lệnh, nên phần sau khối xét từng chỗ khác đó.
+
+% chạy: B
+\begin{codeblock}
+mkdir -p lab_m02
+lakehouse/.venv/bin/python - <<'EOF'
+import csv, json, math, sqlite3, statistics, time, duckdb
+F = 'lakehouse/source_sim/data/olist_orders_dataset.csv'
+rows = list(csv.reader(open(F, newline='')))
+cols = rows[0]
+# Kho theo dòng: SQLite; PRIMARY KEY tạo một index B-tree trên order_id
+lite = sqlite3.connect(':memory:')
+lite.execute(f'CREATE TABLE orders ({cols[0]} TEXT PRIMARY KEY, '
+             + ', '.join(f'{c} TEXT' for c in cols[1:]) + ')')
+lite.executemany(f"INSERT INTO orders VALUES ({', '.join('?' * len(cols))})",
+                 [[v or None for v in r] for r in rows[1:]])
+# Kho theo cột: DuckDB, cùng dữ liệu, không index; 1 luồng như SQLite
+duck = duckdb.connect(config={'threads': 1})
+duck.sql(f"CREATE TABLE orders AS SELECT * FROM '{F}'")
+kho = {'SQLite': lite, 'DuckDB': duck}
+tra = 'SELECT * FROM orders WHERE order_id = ?'
+gop = {'SQLite': """SELECT substr(order_purchase_timestamp, 1, 7), count(*),
+         round(avg(julianday(order_delivered_customer_date)
+                   - julianday(order_purchase_timestamp)), 6)
+       FROM orders GROUP BY 1 ORDER BY 1""",
+       'DuckDB': """SELECT strftime(order_purchase_timestamp, '%Y-%m'), count(*),
+         round(avg(date_diff('second', order_purchase_timestamp,
+                             order_delivered_customer_date)) / 86400, 6)
+       FROM orders GROUP BY 1 ORDER BY 1"""}
+ids = sorted(r[0] for r in rows[1:])[::99][:1000]
+
+def trung_vi(viec, lan=7):  # đo xen kẽ hai kho; vòng 0 chạy nóng, không tính
+    giay = {k: [] for k in viec}
+    for vong in range(lan + 1):
+        for k, f in viec.items():
+            t = time.perf_counter(); f(); t = time.perf_counter() - t
+            if vong: giay[k].append(t)
+    return {k: statistics.median(v) for k, v in giay.items()}
+
+def quet(sql):  # nút quét bảng, ở đáy plan JSON của DuckDB
+    nut = json.loads(duck.sql('EXPLAIN (FORMAT json) ' + sql).fetchall()[0][1])[0]
+    while nut['children']:
+        nut = nut['children'][0]
+    return nut['extra_info']
+
+plan = lambda sql, *p: '; '.join(
+    r[3] for r in lite.execute('EXPLAIN QUERY PLAN ' + sql, p))
+print(f'orders: {len(rows) - 1} dòng, {len(cols)} cột')
+print('SQLite, tra:', plan(tra, 'x'))
+print('SQLite, gộp:', plan(gop['SQLite']))
+q = quet(tra.replace('?', f"'{ids[0]}'"))
+print('DuckDB, tra:', q['Type'], '+ lọc',
+      q['Filters'].strip('(').split('=')[0].strip())
+q = quet(gop['DuckDB'])
+print('DuckDB, gộp:', q['Type'], '+ chỉ đọc', len(q['Projections']), 'trên',
+      len(cols), 'cột:')
+print('  ' + ', '.join(q['Projections']))
+kq = {k: [tuple(r) for r in c.execute(gop[k]).fetchall()] for k, c in kho.items()}
+print(f"hai kho cho cùng {len(kq['SQLite'])} dòng kết quả:",
+      kq['SQLite'] == kq['DuckDB'])
+
+t_tra = trung_vi({k: lambda c=c: [c.execute(tra, [i]).fetchall() for i in ids]
+                  for k, c in kho.items()})
+t_gop = trung_vi({k: lambda c=c, k=k: c.execute(gop[k]).fetchall()
+                  for k, c in kho.items()})
+with open('lab_m02/bai2_thoi_gian.txt', 'w') as f:
+    for k in kho:
+        print(f'{k}: tra {t_tra[k] / len(ids) * 1e6:.1f} µs mỗi lần,',
+              f'gộp {t_gop[k] * 1e3:.1f} ms', file=f)
+bac = lambda r: 10 ** round(math.log10(r))  # làm tròn tỉ số về lũy thừa 10 gần nhất
+print(f'tra {len(ids)} order_id: SQLite nhanh hơn DuckDB khoảng',
+      bac(t_tra['DuckDB'] / t_tra['SQLite']), 'lần')
+print('gộp theo tháng: DuckDB nhanh hơn SQLite khoảng',
+      bac(t_gop['SQLite'] / t_gop['DuckDB']), 'lần')
+EOF
+\end{codeblock}
+\textit{Kết quả:}
+% kết quả: B
+\begin{codeblock}
+orders: 99441 dòng, 8 cột
+SQLite, tra: SEARCH orders USING INDEX sqlite_autoindex_orders_1 (order_id=?)
+SQLite, gộp: SCAN orders; USE TEMP B-TREE FOR GROUP BY
+DuckDB, tra: Sequential Scan + lọc order_id
+DuckDB, gộp: Sequential Scan + chỉ đọc 2 trên 8 cột:
+  order_purchase_timestamp, order_delivered_customer_date
+hai kho cho cùng 25 dòng kết quả: True
+tra 1000 order_id: SQLite nhanh hơn DuckDB khoảng 100 lần
+gộp theo tháng: DuckDB nhanh hơn SQLite khoảng 10 lần
+\end{codeblock}
+
+Mở \code{lab\_\allowbreak{}m02/bai2\_\allowbreak{}thoi\_\allowbreak{}gian.txt} để xem số của máy bạn. Trên máy viết bài, trung vị của 7 lần đo là: tra một \code{order\_\allowbreak{}id} mất 2,2 µs với SQLite và 159,6 µs với DuckDB; gộp 99.441 đơn theo tháng mất 28,0 ms với SQLite và 3,7 ms với DuckDB. Tỉ số thật vì vậy là khoảng 70 lần và khoảng 8 lần; khối chỉ in bậc độ lớn của chúng, vì con số cụ thể đổi theo máy.
+% Kiểm: lab_m02/bai2_thoi_gian.txt sau khối B, ngày 06/11/2026, Apple M5 10 nhân, macOS 26, DuckDB 1.5.6, SQLite 3.50.4. Năm lần chạy lại cùng ngày: tra 2,1 tới 2,2 µs và 159,6 tới 161,1 µs; gộp 27,2 tới 28,9 ms và 3,5 tới 3,7 ms. Trên DuckDB 2.0.0 với Python 3.11.15, DuckDB tra khoảng 283 µs và gộp khoảng 3 ms; hai dòng bậc tỉ số in ra giống hệt.
+
+Các dòng plan cho thấy mỗi engine đi đường nào. Khi tra theo khoá, SQLite đi \code{SEARCH ... USING INDEX}: B-tree dẫn thẳng tới một dòng. DuckDB không có index nên đi \code{Sequential Scan} và lọc \code{order\_\allowbreak{}id} trên cả 99.441 giá trị, cộng thêm chi phí cố định của mỗi câu lệnh. Thêm \code{PRIMARY KEY} cho \code{order\_\allowbreak{}id} trong DuckDB thì mỗi lần tra còn khoảng 62 µs, vẫn chậm hơn SQLite khoảng 30 lần: index giúp được, nhưng chi phí cố định của mỗi câu vẫn giữ kho theo cột ở xa phía sau.
+% Kiểm: ngày 06/11/2026, DuckDB 1.5.6, 1 luồng, 1.000 lần tra, trung vị 7 lần đo: không index 161,0 µs, PRIMARY KEY 62,3 µs, CREATE INDEX 67,8 µs, SQLite 1,5 µs; 62,3 µs so với 2,2 µs của khối B là 28 lần. EXPLAIN của bảng có PRIMARY KEY vẫn in Sequential Scan.
+
+Khi gộp, hai kho khác nhau ở ba chỗ. SQLite đi \code{SCAN orders}: nó xử lý từng dòng một, và với mỗi dòng gọi \code{julianday()} để đọc hai mốc thời gian lưu dạng chữ. DuckDB tính trên từng lô giá trị kiểu \code{TIMESTAMP}, và theo mục \code{Projections} của plan, nó chỉ đọc 2 trên 8 cột. Hai kho cho đúng cùng 25 dòng kết quả, nên chỗ khác chỉ là tốc độ.
+
+Ở đây, đọc ít cột giúp ít nhất, vì dữ liệu nằm sẵn trong RAM. Khi mốc thời gian đã được đổi sẵn ra số, cùng câu gộp trên SQLite chạy 19,2 ms với bảng 3 cột và 20,1 ms với bảng 11 cột: thêm 8 cột chỉ tốn khoảng 4\%. Đọc mốc từ chữ tốn khoảng 8 ms, vì câu gốc chạy 28 ms. Phần chênh còn lại, từ khoảng 20 ms xuống 3,7 ms, đến từ cách chạy câu lệnh: SQLite xử lý từng dòng và gom nhóm bằng một B-tree tạm, còn DuckDB xử lý theo lô.
+% Kiểm: ngày 06/11/2026, SQLite 3.50.4, Python 3.10.20, Apple M5, trung vị 7 lần đo sau một lần chạy nóng, cùng phép gộp avg(d - p) theo tháng trên mốc đã đổi bằng julianday() ra REAL: bảng 3 cột 19,2 và 19,3 ms; bảng 11 cột, gồm 8 cột chữ và 3 cột số đặt cuối, 20,1 ms; câu gốc của khối B trên mốc dạng chữ 28,0 và 28,1 ms; DuckDB 1.5.6 cùng phép gộp 3,4 ms.
+Đọc ít cột thắng lớn khi dữ liệu nằm trên đĩa hay trên kho đối tượng, nơi mỗi cột bỏ qua là một phần byte không phải đọc. Ở đó chi phí đi theo byte: với giá on-demand, BigQuery tính tiền theo số byte câu truy vấn đọc.
+% Nguồn: https://docs.cloud.google.com/bigquery/docs/best-practices-costs ("When using the on-demand pricing model, queries are billed according to the number of bytes read."; WebFetch ngày 06/11/2026)
+
+Quy luật rút ra: kho nào thắng phụ thuộc vào việc, không có kho nào nhanh hơn cho mọi việc. Với bảng lớn hơn, chênh lệch ở việc tra còn tăng, vì khi bảng lớn gấp đôi, mỗi B-tree đọc thêm nhiều nhất một trang, còn quét phải đọc gấp đôi số giá trị.
+% Lý luận, chưa đo: độ sâu B-tree tăng theo log của số dòng.
+
+\begin{luuy}
+\textbf{Bẫy thường gặp.}
+\begin{itemize}
+  \item \textbf{Chạy dashboard thẳng trên database của app.} Câu quét cả bảng giành CPU, bộ nhớ đệm và đĩa với giao dịch của người dùng. Đây là lý do có pipeline chép dữ liệu sang kho phân tích.
+  \item \textbf{Dùng kho theo cột làm backend cho API tra theo khoá.} Ở Làm thử, DuckDB chậm hơn SQLite khoảng 70 lần cho việc này, và vẫn chậm hơn khoảng 30 lần khi đã có index.
+  \item \textbf{Đo một lần rồi kết luận.} Lần chạy đầu gồm cả thời gian khởi động và nạp bộ nhớ đệm. Khối trên chạy nóng một lần, đo xen kẽ hai kho để chúng chịu cùng tải của máy, rồi lấy trung vị.
+\end{itemize}
+\end{luuy}
+
+% =====================================================================
+\section{Bài 3: Hệ thống nguồn}
+
+\textbf{Vấn đề.} Bạn không sở hữu dữ liệu nguồn. Khi team server đổi API, đổi cách phân trang hay đổi nhãn thời gian, pipeline của bạn chịu hậu quả mà không ai báo trước.
+
+\textbf{Giải thích.} Bên SWE, khi gọi service của team khác, bạn chỉ dựa vào hợp đồng API của họ, còn mọi thứ phía sau hợp đồng là việc của họ. Pipeline dữ liệu đứng đúng ở chỗ đó với mỗi \textit{hệ thống nguồn} (source system), tức nơi dữ liệu sinh ra. Cách đọc thì khác: pipeline đọc mọi bản ghi theo lịch, chứ không chỉ vài bản ghi cho mỗi request. Có bốn loại nguồn hay gặp, mỗi loại một cách đọc:
+
+\begin{itemize}
+  \item \textbf{Database giao dịch (OLTP) của app.} Đọc bằng câu truy vấn trên bản sao, hoặc đọc log thay đổi (change data capture, CDC) của database, ở nhánh T2.
+  \item \textbf{API.} Kéo từng trang theo cursor, chịu giới hạn tốc độ, và chỉ thấy những gì API cho xem.
+  \item \textbf{Log và luồng sự kiện.} Đọc từ một log như Kafka, ở Module 12.
+  \item \textbf{File.} CSV hay Parquet được đổ ra định kỳ. Bộ Olist trên Kaggle là loại này.
+\end{itemize}
+
+Repo dùng loại thứ hai. Bronze gọi \code{GET /api/v1/<entity>} từng trang, với cursor do server cấp và client chỉ so như chuỗi. Nhóm server viết logic phát lại, còn \repo{source\_\allowbreak{}sim/} là mock làm đúng theo hợp đồng API.
+% Nguồn: lakehouse/src/lakehouse/sources/olist_api.py dòng 3 tới 4; lakehouse/README.md dòng 22
+
+Điểm quan trọng nhất: API này không trả sự kiện mà trả \textit{version} của trạng thái. Mỗi khi một đơn tới một mốc mới, API phát lại cả đơn đó, với \code{updated\_\allowbreak{}at} là lúc tới mốc.
+
+\begin{ghichu}
+\textbf{So với SWE.} Hệ thống nguồn là database của một service, nhưng không phải service của bạn. Với service của mình, bạn viết migration, biết từng cột nghĩa là gì, và đổi nhãn thời gian thì sửa luôn code đọc.
+
+\textbf{Chỗ so sánh gãy.} Ở đây bạn chỉ có hợp đồng và dữ liệu. Nhãn còn có thể sai: hợp đồng coi mọi mốc là nhãn không có múi giờ, README của mock gọi là UTC, nhưng các chữ số thật ra là giờ São Paulo. Đọc quá nhiều còn làm chậm app của team khác, nên Bronze đọc theo trang và theo lịch.
+% Nguồn: lakehouse/docs/source-api-contract.md dòng 279 tới 283 (mục 7 Múi giờ)
+\end{ghichu}
+
+\subsection{Làm thử}
+
+Khối dưới dùng đúng hàm phát lại của mock để đếm số version API phát ra cho bảng \code{orders}, rồi in các version của một đơn.
+
+% chạy: C
+\begin{codeblock}
+lakehouse/.venv/bin/python -B - <<'EOF'
+import collections, sys
+sys.path.insert(0, 'lakehouse')  # dùng đúng luật phát lại của mock trong repo
+from source_sim.replay import order_versions, read_csv
+orders = list(read_csv('lakehouse/source_sim/data/olist_orders_dataset.csv'))
+so_version = collections.Counter(len(order_versions(o)) for o in orders)
+print('số đơn trong CSV:', len(orders))
+print('số version API phát ra:', sum(k * n for k, n in so_version.items()))
+print('số đơn theo số version:', dict(sorted(so_version.items())))
+don = next(o for o in orders if o['order_id'] == 'e481f51cbdc54678b7cc49136f2d6af7')
+for updated_at, ban in order_versions(don):
+    print(updated_at, ban['order_status'].ljust(9),
+          ban['order_delivered_customer_date'])
+EOF
+\end{codeblock}
+\textit{Kết quả:}
+% kết quả: C
+\begin{codeblock}
+số đơn trong CSV: 99441
+số version API phát ra: 391551
+số đơn theo số version: {1: 177, 2: 1626, 3: 2430, 4: 95208}
+2017-10-02 10:56:33 created   None
+2017-10-02 11:07:15 approved  None
+2017-10-04 19:55:00 shipped   None
+2017-10-10 21:25:13 delivered 2017-10-10 21:25:13
+\end{codeblock}
+
+99.441 đơn thành 391.551 version, đúng bằng số dòng của \repo{raw.olist\_\allowbreak{}orders}. Staging giữ version mới nhất của mỗi khoá, nên \repo{stg\_\allowbreak{}olist\_\allowbreak{}orders} còn 99.441 dòng. Đơn mẫu đi qua bốn version, và chỉ version cuối có ngày giao.
+% Nguồn: lakehouse/docs/data-model.md mục 10 (raw.olist_orders 391.551, staging.stg_olist_orders 99.441) và mục 9 hàng 17
+
+\begin{luuy}
+\textbf{Bẫy thường gặp.}
+\begin{itemize}
+  \item \textbf{Đếm đơn trên bảng raw.} Mỗi version là một dòng, nên đếm trên \repo{raw.olist\_\allowbreak{}orders} ra 391.551 thay vì 99.441.
+  \item \textbf{Tin nhãn múi giờ.} Lab 2.1 chỉ cách kiểm múi giờ bằng chính dữ liệu.
+  \item \textbf{So hai trục thời gian khác nhau.} \code{\_ingested\_\allowbreak{}at} của raw là giờ UTC thật của Spark, còn \code{updated\_\allowbreak{}at} là giờ mô phỏng. Hợp đồng dặn đừng so hai cột này.
+  % Nguồn: lakehouse/docs/source-api-contract.md dòng 285
+\end{itemize}
+\end{luuy}
+
+% =====================================================================
+\section{Bài 4: Ai làm gì trong một team dữ liệu}
+
+\textbf{Vấn đề.} Một con số trên dashboard sai. Ai sửa? Nếu không rõ ranh giới giữa các vai, lỗi định nghĩa như ở Bài 1 rơi vào khoảng trống giữa hai team.
+
+\textbf{Giải thích.} Bên SWE, product owner viết tiêu chí chấp nhận, còn engineer là người tìm ra các trường hợp biên khi viết code. Team dữ liệu chia việc giống vậy, và repo có sẵn một ví dụ. Ngày hẹn giao của Olist luôn là 00:00, nên ``giao trễ'' có hai cách tính: so theo giờ thì có 7.827 đơn trễ, so theo ngày thì có 6.535 đơn. Người viết Silver thấy trường hợp biên này và chọn so theo ngày; quyết định đó nằm trong cột \repo{core.orders.is\_\allowbreak{}delivered\_\allowbreak{}late}, kèm lý do trong \repo{docs/data-model.md}. Ở team lớn hơn, analytics engineer giữ định nghĩa này, còn BA xác nhận nó đúng nghĩa nghiệp vụ.
+% Nguồn: lakehouse/docs/data-model.md dòng 233 và 239 (is_delivered_late so theo ngày, vì ngày hẹn luôn là 00:00:00) và dòng 332 (mục 9 hàng 19: 6.535 đơn trễ); lakehouse/src/lakehouse/silver/core.py dòng 190 tới 191
+% Kiểm: DuckDB 1.5.6 ngày 06/11/2026: so order_delivered_customer_date > order_estimated_delivery_date theo timestamp ra 7827 đơn trễ, so theo ngày ra 6535.
+
+Bốn vai dưới hay gặp quanh một nền tảng dữ liệu. Cột cuối chỉ chỗ mỗi vai chạm vào repo.
+
+\begin{xltabular}{\textwidth}{@{}P{2.8cm} L P{3.2cm} P{3.4cm}@{}}
+\toprule
+\thd{vai} & \thd{làm ra gì} & \thd{ai dùng trực tiếp} & \thd{trong repo} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+backend engineer & service, API và database của app & người dùng app, service khác & team server viết API Olist \\
+data engineer & pipeline, bảng raw và Silver, lịch chạy, kiểm chất lượng & analytics engineer, hệ thống khác & Bronze, Silver, 3 DAG trong \repo{airflow/dags/} \\
+analytics engineer & bảng Gold đã mô hình hoá, định nghĩa metric dùng chung & data analyst & Gold, chưa làm; Module 3 và Module 7 \\
+data analyst & dashboard, phân tích, câu trả lời cho nghiệp vụ & BA, quản lý & Metabase, Module 11 \\
+\end{xltabular}
+
+Claire Carroll của dbt Labs viết: ``Analytics engineers create clean data sets for end users.'' Theo bà, vai này nối khoảng cách giữa data engineering và phân tích. Repo còn cho thấy một vai thứ năm: team nền tảng (platform team). Ở đây đó là nhóm khác vận hành Airflow, nên repo chỉ giao 3 file DAG và tài liệu.
+% Nguồn: https://www.getdbt.com/what-is-analytics-engineering (Claire Carroll, 26/03/2019); lakehouse/README.md dòng 4
+
+Ở công ty nhỏ, một người có thể làm cả ba vai dữ liệu: data engineer, analytics engineer và data analyst. Thứ cần chốt là việc, không phải chức danh: ai giữ định nghĩa metric, và ai trực khi pipeline hỏng.
+
+\begin{ghichu}
+\textbf{So với SWE.} Data engineer gần với backend engineer nhất: cùng viết code, viết test, review và deploy.
+
+\textbf{Chỗ so sánh gãy.} Sản phẩm của data engineer là một bảng đúng và đúng giờ. Người dùng là người đọc số, không phải client gọi API theo hợp đồng chặt, nên lỗi thường lộ ra muộn, khi ai đó thấy một con số lạ.
+\end{ghichu}
+
+\begin{luuy}
+\textbf{Bẫy thường gặp.}
+\begin{itemize}
+  \item \textbf{Nghĩ định nghĩa metric là việc riêng của BA.} BA biết nghiệp vụ, còn người viết SQL biết dữ liệu có những cách hiểu nào. Định nghĩa chỉ xong khi cả hai cùng ký vào thẻ yêu cầu.
+\end{itemize}
+\end{luuy}
+
+% =====================================================================
+\section{Bài 5: ETL và ELT}
+
+\textbf{Vấn đề.} Tháng sau, BA muốn doanh thu cộng thêm phí vận chuyển. Nếu kho chỉ giữ bảng kết quả, bạn phải kéo lại dữ liệu từ nguồn, và nguồn có thể không còn giữ bản cũ.
+
+\textbf{Giải thích.} Bên SWE, bạn từng chọn giữa hai cách lưu: chỉ giữ một bảng tổng đã tính sẵn, hay giữ cả log sự kiện để tính lại khi cần. Bảng tổng nhẹ hơn, nhưng khi công thức đổi thì không còn gì để tính lại. ETL và ELT là đúng lựa chọn đó cho cả một kho dữ liệu. ETL (extract, transform, load) biến đổi dữ liệu trước, rồi chỉ nạp kết quả vào kho. ELT (extract, load, transform) nạp dữ liệu thô vào kho trước, rồi biến đổi ngay trong kho, nên tính lại bao nhiêu lần cũng được.
+% Nguồn: https://aws.amazon.com/compare/the-difference-between-etl-and-elt/ (ETL biến đổi trên một máy xử lý riêng rồi mới nạp; ELT: "you can interact with and transform the raw data as many times as needed")
+
+Repo là ELT. Bronze nạp từng version JSON vào \code{raw} gần như nguyên trạng, chỉ thêm các cột dòng dõi như \code{\_ingested\_\allowbreak{}at} và \code{\_run\_\allowbreak{}id}. Silver biến đổi bằng Spark SQL ngay trong lakehouse. ETL vẫn hợp trong vài trường hợp: AWS kể database cũ và luồng cảm biến IoT. Thêm một trường hợp nữa: cột dữ liệu cá nhân không được phép vào kho thì phải bỏ trước khi nạp. Module 6 bàn dữ liệu cá nhân kỹ hơn.
+% Nguồn: lakehouse/docs/data-model.md dòng 22 tới 32 (cột dòng dõi)
+
+\begin{ghichu}
+\textbf{So với SWE.} ELT giống event sourcing. Martin Fowler mô tả event sourcing là ``Capture all changes to an application state as a sequence of events'', và nhờ đó có thể bỏ trạng thái đi rồi dựng lại bằng cách chạy lại các event. Bronze giữ mọi version, nên Silver dựng lại được bất kỳ lúc nào.
+% Nguồn: https://martinfowler.com/eaaDev/EventSourcing.html
+
+\textbf{Chỗ so sánh gãy.} Event của event sourcing do chính bạn thiết kế. Dữ liệu thô của ELT do team khác thiết kế, có thể bẩn và có thể chứa dữ liệu cá nhân. Giữ thô cũng tốn chỗ: \repo{raw.olist\_\allowbreak{}orders} có gần bốn lần số dòng của bảng đơn đã làm sạch.
+\end{ghichu}
+
+\subsection{Làm thử}
+
+Khối dưới tính doanh thu theo ngày bằng hai cách. ETL tính bằng Python rồi chỉ nạp kết quả vào kho. ELT nạp hai file CSV vào kho rồi tính bằng SQL trong kho. Sau đó luật đổi: doanh thu cộng thêm phí vận chuyển.
+
+% chạy: E
+\begin{codeblock}
+lakehouse/.venv/bin/python - <<'EOF'
+import collections, csv, decimal, duckdb
+D = 'lakehouse/source_sim/data/'
+doc = lambda f: csv.DictReader(open(D + f, newline=''))
+# ETL: biến đổi bằng Python trước khi nạp; kho chỉ nhận bảng kết quả
+ngay = {r['order_id']: r['order_purchase_timestamp'][:10]
+        for r in doc('olist_orders_dataset.csv')
+        if r['order_status'] not in ('canceled', 'unavailable')}
+tong = collections.defaultdict(decimal.Decimal)
+for r in doc('olist_order_items_dataset.csv'):
+    if r['order_id'] in ngay:
+        tong[ngay[r['order_id']]] += decimal.Decimal(r['price'])
+etl = duckdb.connect()
+etl.sql('CREATE TABLE daily_revenue (order_date DATE, revenue DECIMAL(14,2))')
+etl.executemany('INSERT INTO daily_revenue VALUES (?, ?)', list(tong.items()))
+# ELT: nạp nguyên CSV vào kho, rồi biến đổi bằng SQL ngay trong kho
+elt = duckdb.connect()
+elt.sql(f"CREATE TABLE raw_orders AS SELECT * FROM '{D}olist_orders_dataset.csv'")
+elt.sql(f"CREATE TABLE raw_items AS SELECT * FROM '{D}olist_order_items_dataset.csv'")
+luat = """CREATE OR REPLACE TABLE daily_revenue AS
+  SELECT CAST(o.order_purchase_timestamp AS DATE) AS order_date,
+         sum(CAST({tien} AS DECIMAL(14,2))) AS revenue
+  FROM raw_orders o JOIN raw_items i USING (order_id)
+  WHERE o.order_status NOT IN ('canceled', 'unavailable') GROUP BY 1"""
+elt.sql(luat.format(tien='i.price'))
+bang = lambda con: [r[0] for r in con.sql('SHOW TABLES').fetchall()]
+lay = lambda con: sorted(con.sql('SELECT * FROM daily_revenue').fetchall())
+print('ETL, bảng trong kho:', bang(etl))
+print('ELT, bảng trong kho:', bang(elt))
+print(f'hai cách cho cùng {len(lay(etl))} dòng daily_revenue:', lay(etl) == lay(elt))
+print('Đổi luật: doanh thu cộng thêm freight_value')
+elt.sql(luat.format(tien='i.price + i.freight_value'))
+print('  ELT, chạy lại một câu SQL:',
+      elt.sql('SELECT sum(revenue) FROM daily_revenue').fetchall()[0][0])
+try:
+    etl.sql('SELECT sum(freight_value) FROM daily_revenue')
+except duckdb.Error as e:
+    print('  ETL:', type(e).__name__, 'vì kho không có cột freight_value')
+EOF
+\end{codeblock}
+\textit{Kết quả:}
+% kết quả: E
+\begin{codeblock}
+ETL, bảng trong kho: ['daily_revenue']
+ELT, bảng trong kho: ['daily_revenue', 'raw_items', 'raw_orders']
+hai cách cho cùng 614 dòng daily_revenue: True
+Đổi luật: doanh thu cộng thêm freight_value
+  ELT, chạy lại một câu SQL: 15740216.93
+  ETL: BinderException vì kho không có cột freight_value
+\end{codeblock}
+
+Trước khi luật đổi, hai cách cho cùng 614 dòng. Sau khi luật đổi, ELT chỉ cần chạy lại một câu SQL trên dữ liệu thô đã có trong kho. Kho của ETL không còn cột \code{freight\_\allowbreak{}value}, nên phải đọc lại nguồn và viết lại bước biến đổi.
+
+\begin{luuy}
+\textbf{Bẫy thường gặp.}
+\begin{itemize}
+  \item \textbf{Nghĩ ELT là không kiểm gì khi nạp.} Bronze vẫn ghi cursor và giờ nạp cho từng dòng, để biết đã đọc tới đâu và lần ngược một dòng về lần chạy đã sinh ra nó.
+  \item \textbf{Nghĩ ELT đã thay hẳn ETL.} Cột dữ liệu cá nhân không được phép vào kho thì phải bỏ trước khi nạp; khi đó một bước ETL nhỏ đứng trước ELT.
+\end{itemize}
+\end{luuy}
+
+% =====================================================================
+\section{Bài 6: Lướt nhanh vòng đời, kho, tầng và batch}
+
+\textbf{Vấn đề.} Repo \repo{lakehouse/} đã chia các tầng. Bài này chỉ gắn tên chuẩn cho chúng, để bạn đọc được tài liệu và đề thi mà không phải dịch trong đầu.
+
+\textbf{Giải thích.} Mỗi dòng dưới là một khái niệm, một câu lời thường, và chỗ của nó trong repo.
+
+\begin{xltabular}{\textwidth}{@{}P{3.0cm} L P{4.6cm}@{}}
+\toprule
+\thd{khái niệm} & \thd{nói gọn} & \thd{trong repo} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+vòng đời DE & sinh dữ liệu, lưu trữ, nạp, biến đổi, phục vụ & \repo{source\_\allowbreak{}sim}; rustfs và Iceberg; Bronze; Silver; Gold, Trino, Metabase ở các module sau \\
+undercurrent & sáu mối lo chạy qua mọi giai đoạn: bảo mật, quản lý dữ liệu, DataOps, kiến trúc dữ liệu, orchestration, kỹ thuật phần mềm & Airflow, test trong \repo{tests/}, quyền ở Module 6 \\
+data warehouse & kho phân tích, dữ liệu có cấu trúc, phục vụ BI & repo không dùng \\
+data lake & kho file rẻ, giữ mọi kiểu dữ liệu ở dạng gốc & bucket \code{lakehouse} trên rustfs \\
+lakehouse & file mở trên kho đối tượng, cộng một table format có giao dịch & Parquet, Iceberg 1.8.1, REST catalog \\
+medallion & bronze thô chưa kiểm, silver đã kiểm và làm sạch, gold đã mô hình cho phân tích & \code{raw}; \code{staging}, \code{semantic}, \code{core}; \code{analytics} và \code{marts} chưa làm \\
+batch và streaming & xử lý theo lô theo lịch, hay xử lý từng sự kiện khi nó tới & batch: Bronze mỗi 15 phút, Silver mỗi 4 giờ; streaming ở Module 12 \\
+Lambda và Kappa & hai đường batch và speed song song, hay một đường stream tính lại bằng cách phát lại log & repo không cần kiến trúc nào trong hai: độ tươi tính bằng giờ là đủ, nên chỉ cần batch \\
+\end{xltabular}
+% Nguồn: FDE, mục lục chương 2; https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures (Lambda, Kappa, lakehouse; ms.date 2025-09-12)
+% Nguồn: https://docs.databricks.com/aws/en/lakehouse/medallion (cập nhật 29/10/2026); lakehouse/docs/data-model.md dòng 9 tới 15; lakehouse/README.md dòng 13 tới 24 và 78
+
+Ba ý đáng nhớ hơn tên gọi. Tầng sau luôn dựng lại được từ tầng trước: \code{raw} giữ cả 391.551 version, nên 99.441 dòng của staging có thể dựng lại bất kỳ lúc nào. Medallion chia tầng theo chất lượng, không thay cho mô hình hoá: Databricks gọi nó là ``a recommended best practice but not a requirement'', và nói gold vẫn cần dimensional model. Còn Lambda có nhược điểm mà Azure Architecture Center nêu rõ: logic xử lý nằm ở hai nơi, với hai framework.
+
+\begin{ghichu}
+\textbf{So với SWE.} Các tầng giống kiến trúc nhiều lớp: adapter nhận dữ liệu ngoài vào, domain làm sạch, read model phục vụ việc đọc. Lambda giống ghi đôi vào database và cache: một đường nhanh, một đường chắc.
+
+\textbf{Chỗ so sánh gãy.} Trong app, sửa dữ liệu ở domain là bình thường; ở đây không ai sửa tay \code{raw}, vì mọi tầng sau dựng từ nó. Cache sai thì xoá đi là xong, còn hai đường của Lambda phải ra cùng một con số, nên mỗi luật phải viết và test hai lần.
+\end{ghichu}
+
+\begin{luuy}
+\textbf{Bẫy thường gặp.}
+\begin{itemize}
+  \item \textbf{Chọn streaming khi độ tươi tính bằng giờ là đủ.} Thẻ yêu cầu ở Bài 1 quyết định chuyện này, không phải sở thích công nghệ.
+  \item \textbf{Coi lakehouse là một sản phẩm mua về.} Nó là một cách ghép: file mở, table format, catalog, và nhiều engine cùng đọc.
+\end{itemize}
+\end{luuy}
+
+% =====================================================================
+\section{Bài 7: Data mesh và sản phẩm dữ liệu}
+
+\textbf{Vấn đề.} Khi có hàng chục team cùng cần dữ liệu, một team dữ liệu trung tâm thành nút cổ chai.
+
+\textbf{Giải thích.} Data mesh là một cách tổ chức team, không phải một công nghệ. Zhamak Dehghani nêu bốn nguyên tắc: mỗi domain sở hữu dữ liệu phân tích của mình; dữ liệu là sản phẩm, và ``the consumers of that data should be treated as customers''; một nền tảng tự phục vụ chung; và luật quản trị chung chạy tự động. Trong repo này, một \textit{sản phẩm dữ liệu} (data product) sẽ là \repo{core.orders} có team chủ, có thẻ yêu cầu như Lab 2.2, có hợp đồng và SLO độ tươi. Một nền tảng nhỏ với một team như repo chưa cần data mesh; nó chỉ đáng cân nhắc khi có nhiều domain và nhiều team dữ liệu.
+% Nguồn: https://martinfowler.com/articles/data-mesh-principles.html (Zhamak Dehghani, 03/12/2020)
+
+\begin{ghichu}
+\textbf{So với SWE.} Sản phẩm dữ liệu giống một service có team sở hữu, có hợp đồng và người dùng.
+
+\textbf{Chỗ so sánh gãy.} Người dùng của sản phẩm dữ liệu là người phân tích, và mọi domain phải dùng chung nền tảng và luật quản trị, nên không team nào được tự chọn hết như với service riêng.
+\end{ghichu}
+
+\begin{luuy}
+\textbf{Bẫy thường gặp.} Đổi tên team thành ``domain'' mà không có nền tảng chung và luật quản trị chung. Khi đó bạn có nhiều kho dữ liệu rời rạc, không phải data mesh.
+\end{luuy}
+
+% =====================================================================
+\section{Bài 8: Tự viết hay mua}
+
+\textbf{Vấn đề.} Bronze của repo là code tự viết. Mỗi nguồn mới là một quyết định mới: viết tiếp, hay mua một connector có sẵn.
+
+\textbf{Giải thích.} Phần code thường nhỏ hơn bạn nghĩ, còn phần giữ cho nó đúng thì lớn hơn. Bronze của repo gồm client API 89 dòng và job nạp 81 dòng. Ba file test của phần này dài 373 dòng, và hợp đồng API mà code phải giữ đúng dài 442 dòng: cursor, trang, nhãn thời gian, chạy lại sau khi bị kill.
+% Kiểm: wc -l trong lakehouse ngày 06/11/2026: src/lakehouse/sources/olist_api.py 89, src/lakehouse/bronze/ingest_olist.py 81, tests/test_bronze.py 173, tests/test_olist_api.py 130, tests/stub_api.py 70, docs/source-api-contract.md 442.
+
+Năm câu hỏi dưới giúp quyết định. Sách Fundamentals of Data Engineering có mục ``Build Versus Buy'' trong chương 4 bàn kỹ hơn.
+% Nguồn: FDE, mục lục chương 4
+
+\begin{xltabular}{\textwidth}{@{}P{4.6cm} L L@{}}
+\toprule
+\thd{câu hỏi} & \thd{nghiêng về tự viết} & \thd{nghiêng về mua} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+nguồn đã có connector sẵn chưa? & chưa, như API nội bộ của Olist & có, như một SaaS phổ biến \\
+phần này có giúp công ty khác đối thủ không? & có & không; chép dữ liệu là việc ai cũng làm \\
+ai trực khi nguồn đổi? & team có người trực và có test như \repo{tests/test\_\allowbreak{}bronze.py} & không có ai \\
+dữ liệu được phép đi qua bên thứ ba không? & không & có, sau khi xét hợp đồng \\
+tổng chi phí sở hữu là gì? & giờ kỹ sư để viết, sửa và trực & tiền thuê bao; hỏi rõ cách tính giá trước khi ký \\
+\end{xltabular}
+
+\begin{ghichu}
+\textbf{So với SWE.} Đây là câu hỏi quen: dùng thư viện hay tự viết.
+
+\textbf{Chỗ so sánh gãy.} Một thư viện bạn ghim phiên bản rồi để yên. Một connector chạy mỗi 15 phút trên nguồn do người khác đổi, nên nó hỏng vào lúc bạn không chọn, dù là code tự viết hay đồ mua về.
+\end{ghichu}
+
+\begin{luuy}
+\textbf{Bẫy thường gặp.} Chỉ tính giờ viết code. Với Bronze của repo, test và hợp đồng dài gần gấp năm lần code nạp; đó mới là phần tốn công lâu dài.
+\end{luuy}
+% Kiểm: (373 + 442) / (89 + 81) = 4,8.
+
+% =====================================================================
+\section{Lab 2.1: Một câu hỏi, một đáp án}
+
+Lab này làm lại câu hỏi ở phần Vấn đề thật cho tới khi chỉ còn một đáp án. Mọi file nằm trong \code{lab\_\allowbreak{}m02/}.
+
+\textbf{Bước 1: tạo công cụ chạy SQL và kiểm múi giờ.} File \code{hoi.py} mở DuckDB, tạo view cho 9 file CSV, rồi chạy từng câu SQL trong file bạn đưa vào. Mỗi câu kết thúc bằng dấu chấm phẩy. \code{hoi.py} bỏ comment trước khi tách câu, nên comment chứa gì cũng được; chỉ chuỗi trong câu SQL là không được chứa ký hiệu mở comment. Công cụ đặt session ở UTC, giống session Spark của repo, để kết quả không phụ thuộc múi giờ máy bạn. File CSV không ghi múi giờ, nên hai câu trong \code{mui\_\allowbreak{}gio.sql} tìm bằng chứng ngay trong dữ liệu.
+% Nguồn: lakehouse/src/lakehouse/spark.py dòng 12 (spark.sql.session.timeZone UTC)
+
+% chạy: L1
+\begin{codeblock}
+mkdir -p lab_m02
+cat > lab_m02/hoi.py <<'EOF'
+"""Chạy từng câu SQL trong một file trên 9 CSV Olist và in kết quả."""
+import pathlib, re, sys, duckdb
+D = 'lakehouse/source_sim/data/'
+con = duckdb.connect()
+con.sql("SET TimeZone = 'UTC'")  # như session Spark của repo
+for t in ['orders', 'order_items', 'order_payments', 'order_reviews',
+          'customers', 'products', 'sellers', 'geolocation']:
+    con.sql(f"CREATE VIEW {t} AS SELECT * FROM '{D}olist_{t}_dataset.csv'")
+con.sql(f"CREATE VIEW category_translation AS "
+        f"SELECT * FROM '{D}product_category_name_translation.csv'")
+van_ban = pathlib.Path(sys.argv[1]).read_text()
+# bỏ comment trước, để dấu ; trong comment không cắt nhầm câu
+van_ban = re.sub(r'/\*.*?\*/|--[^\n]*', ' ', van_ban, flags=re.S)
+for cau in con.extract_statements(van_ban):
+    sql = cau.query.strip().rstrip(';')  # DuckDB 2.0 giữ dấu ; cuối câu
+    if cau.type == duckdb.StatementType.SELECT:
+        con.sql(sql).show()
+    else:  # CREATE, SET: chạy, không in gì
+        con.execute(sql)
+EOF
+cat > lab_m02/mui_gio.sql <<'EOF'
+/* 1. Review tạo lúc 01:00 thay vì 00:00, đếm theo ngày */
+SELECT CAST(review_creation_date AS DATE) AS ngay, count(*) AS so_review
+FROM order_reviews WHERE hour(review_creation_date) = 1
+GROUP BY 1 ORDER BY 1;
+/* 2. Đồng hồ São Paulo quanh 03:00 UTC ngày 16/10/2016 */
+SELECT t AS gio_utc, t AT TIME ZONE 'America/Sao_Paulo' AS gio_sao_paulo
+FROM (VALUES (TIMESTAMPTZ '2016-10-16 02:59:59+00'),
+             (TIMESTAMPTZ '2016-10-16 03:00:00+00')) v(t);
+EOF
+lakehouse/.venv/bin/python lab_m02/hoi.py lab_m02/mui_gio.sql
+\end{codeblock}
+\textit{Kết quả:}
+% kết quả: L1
+\begin{codeblock}
+┌────────────┬───────────┐
+│    ngay    │ so_review │
+│    date    │   int64   │
+├────────────┼───────────┤
+│ 2016-10-16 │         1 │
+│ 2017-10-15 │        84 │
+└────────────┴───────────┘
+
+┌──────────────────────────┬─────────────────────┐
+│         gio_utc          │    gio_sao_paulo    │
+│ timestamp with time zone │      timestamp      │
+├──────────────────────────┼─────────────────────┤
+│ 2016-10-16 02:59:59+00   │ 2016-10-15 23:59:59 │
+│ 2016-10-16 03:00:00+00   │ 2016-10-16 01:00:00 │
+└──────────────────────────┴─────────────────────┘
+\end{codeblock}
+
+Câu 2 cho thấy nửa đêm ngày 16/10/2016 không có ở São Paulo: đồng hồ nhảy từ 23:59:59 sang 01:00:00, vì Brazil bắt đầu giờ mùa hè. Review được tạo ``lúc nửa đêm'' của ngày đó và của ngày 15/10/2017 nên mang giờ 01:00, đúng như câu 1.
+
+Hai dấu hiệu này khớp \repo{docs/data-model.md} mục 9 hàng 18, nơi còn ghi rằng ít đơn nhất được đặt lúc 4 tới 5 giờ sáng. Vậy mọi mốc là giờ địa phương Brazil, dù hợp đồng API coi chúng là nhãn không múi giờ và README của mock gọi là UTC.
+% Nguồn: lakehouse/docs/data-model.md dòng 331 (mục 9 hàng 18: 85 review mang 01:00:00, 1 vào 2016-10-16 và 84 vào 2017-10-15; ít đơn nhất lúc 4 tới 5 giờ, 206 và 188 đơn)
+
+\textit{Nếu lỗi:} \code{IO Error: No files found} nghĩa là bạn không chạy từ thư mục cha của \repo{lakehouse/}. Nếu cột \code{gio\_\allowbreak{}utc} hiện \code{+07} thay vì \code{+00}, file \code{hoi.py} của bạn thiếu dòng \code{SET TimeZone}.
+
+\textbf{Bước 2: đếm theo từng cách hiểu.} Viết file \code{lab\_\allowbreak{}m02/cach\_\allowbreak{}hieu.sql}, một câu truy vấn trả về sáu dòng, mỗi dòng một cách hiểu, cột \code{cach\_\allowbreak{}hieu} và \code{so\_\allowbreak{}don}, sắp theo \code{cach\_\allowbreak{}hieu}:
+
+\begin{enumerate}
+  \item[a.] đơn mua trong tháng 2, mốc theo giờ São Paulo như dữ liệu;
+  \item[b.] đơn mua trong tháng 2, nhưng hai mốc 00:00 ngày 01/02 và 00:00 ngày 01/03 tính theo giờ UTC;
+  \item[c.] trong a, đơn giao tới khách từ 00:00 ngày 01/03;
+  \item[d.] trong a, đơn giao tới khách từ 00:00 ngày 02/03;
+  \item[e.] trong a, đơn chưa giao lúc 00:00 ngày 01/03, kể cả đơn không bao giờ giao;
+  \item[f.] trong a, đơn giao từ 00:00 ngày 01/03 giờ UTC.
+\end{enumerate}
+
+Để đổi một mốc UTC sang giờ São Paulo, dùng \code{TIMESTAMPTZ '2017-03-01 00:00:00+00' AT TIME ZONE 'America/Sao\_\allowbreak{}Paulo'} như câu 2 ở bước 1. Muốn sáu dòng ra đúng thứ tự, đặt nhãn bắt đầu bằng chữ cái và thêm \code{ORDER BY 1}.
+
+% chạy: L2 cần-lời-giải
+\begin{codeblock}
+lakehouse/.venv/bin/python lab_m02/hoi.py lab_m02/cach_hieu.sql
+\end{codeblock}
+\textit{Kết quả, với lời giải tham khảo:}
+% kết quả: L2
+\begin{codeblock}
+┌──────────────────────────────────────────────┬────────┐
+│                  cach_hieu                   │ so_don │
+│                   varchar                    │ int64  │
+├──────────────────────────────────────────────┼────────┤
+│ a. mua trong tháng 2, giờ São Paulo          │   1780 │
+│ b. mua trong tháng 2, giờ UTC                │   1771 │
+│ c. trong a, giao từ 00:00 ngày 01/03         │    746 │
+│ d. trong a, giao từ 00:00 ngày 02/03         │    673 │
+│ e. trong a, chưa giao lúc 00:00 ngày 01/03   │    873 │
+│ f. trong a, giao từ 00:00 ngày 01/03 giờ UTC │    746 │
+└──────────────────────────────────────────────┴────────┘
+\end{codeblock}
+
+\textit{Nếu lệch:} dòng a khác 1.780 thì kiểm khoảng nửa mở; dòng e khác 873 thì kiểm cách bạn xử lý \code{NULL}, vì 127 đơn chưa bao giờ được giao.
+
+Dòng b mất 9 đơn so với dòng a: múi giờ đổi cả mẫu số. Dòng f bằng dòng c chỉ là may: mốc 00:00 UTC ngày 01/03 là 21:00 ngày 28/02 ở São Paulo, và từ giờ đó tới hết ngày không có đơn nào được giao.
+% Kiểm: hoi.py ngày 06/11/2026, DuckDB 1.5.6: đơn tháng 2 giao theo ngày 24/02: 80, 25/02: 14, 27/02: 1 (20:48:20), 01/03: 73, 02/03: 83; không có dòng cho 26/02 và 28/02. Mốc 00:00 giờ Hà Nội ngày 01/03 là 14:00 ngày 28/02 ở São Paulo và cũng cho 746; tháng 2 theo giờ Hà Nội có 1.776 đơn.
+
+\textbf{Bước 3: viết lại câu hỏi.} BA trả lời: ``sau 01/03'' nghĩa là từ ngày 02/03 trở đi; mọi mốc theo giờ Brazil như dữ liệu; đơn chưa giao không tính; lấy số trên toàn bộ dữ liệu hiện có. Viết \code{lab\_\allowbreak{}m02/cau\_\allowbreak{}hoi\_\allowbreak{}chot.sql}: một comment ở đầu chứa câu hỏi đã viết lại thành một câu, rồi câu SQL trả về đúng một số.
+
+% chạy: L3 cần-lời-giải
+\begin{codeblock}
+lakehouse/.venv/bin/python lab_m02/hoi.py lab_m02/cau_hoi_chot.sql
+\end{codeblock}
+\textit{Kết quả, với lời giải tham khảo:}
+% kết quả: L3
+\begin{codeblock}
+┌────────┐
+│ so_don │
+│ int64  │
+├────────┤
+│    673 │
+└────────┘
+\end{codeblock}
+
+\textit{Nếu lệch:} kết quả khác 673 thì kiểm lại mốc ``sau 01/03'' như dòng d ở bước 2, và kiểm rằng đơn chưa giao không được tính.
+
+\hoanthanh{\code{cach\_\allowbreak{}hieu.sql} in đúng sáu số 1.780, 1.771, 746, 673, 873 và 746; \code{cau\_\allowbreak{}hoi\_\allowbreak{}chot.sql} in 673; câu hỏi viết lại nêu đủ bốn thứ: khoảng nửa mở của từng mốc, múi giờ, cách tính đơn chưa giao, và dữ liệu tới ngày nào.}
+
+% =====================================================================
+\section{Lab 2.2: Thẻ yêu cầu cho năm câu hỏi Gold}
+
+Năm câu hỏi ở \repo{docs/data-model.md} mục 11 sẽ thành bảng Gold ở Module 3 và Module 7. Lab này viết thẻ yêu cầu cho cả năm, rồi kiểm ba thẻ bằng SQL. Một thẻ đạt khi người khác đọc nó và tính ra đúng số của bạn mà không phải hỏi lại.
+
+\textbf{Bước 1: tạo file thẻ.} Câu 1 đã có thẻ mẫu, viết từ biên bản ở bước 2. Bốn câu còn lại để trống.
+
+% chạy: L4
+\begin{codeblock}
+cat > lab_m02/yeu_cau.md <<'EOF'
+# Thẻ yêu cầu cho năm câu hỏi Gold
+
+## 1. Doanh thu theo ngày, danh mục, bang người bán
+- Người dùng: team BA, dashboard xem lúc 08:00 mỗi sáng; chọn danh mục chạy khuyến mãi
+- Grain: một dòng mỗi (ngày đặt, danh mục, bang người bán)
+- Metric: tổng price của dòng hàng, BRL; không cộng freight_value
+- Lọc: bỏ đơn canceled và unavailable
+- Danh mục: tên tiếng Anh; không có bản dịch thì tên gốc; không có tên thì unknown
+- Mốc cắt: ngày của order_purchase_timestamp, giờ São Paulo, [00:00, 00:00 hôm sau)
+- Ngày chốt: số của một ngày chốt sau 14 ngày; trước đó là số tạm
+- Độ tươi: lúc 08:00 có mọi đơn đặt trước 00:00; đơn chưa duyệt chưa có doanh thu
+- Câu kiểm: 24/11/2017 trên toàn bộ dữ liệu: số dòng, tổng cả ngày, dòng lớn nhất
+
+## 2. Giao hàng nhanh hay chậm
+## 3. Khách quay lại
+## 4. Điểm review theo người bán hay danh mục
+## 5. Bản đồ khách và người bán
+EOF
+grep -c '^## ' lab_m02/yeu_cau.md
+\end{codeblock}
+\textit{Kết quả:}
+% kết quả: L4
+\begin{codeblock}
+5
+\end{codeblock}
+% Kiểm: mô phỏng bằng source_sim.replay ngày 06/11/2026, Python 3.10.20, trạng thái đơn theo giờ mô phỏng: doanh thu ngày 24/11/2017, bỏ canceled và unavailable, thấy 130347.74 lúc 25/11 08:00, 146442.66 lúc 28/11 08:00, 152588.84 lúc 01/12 08:00, và 152653.74 từ 08/12 00:00, bằng số trên toàn bộ dữ liệu. Đơn ngày 24/11 được duyệt muộn nhất lúc 2017-12-07 09:50:08. Trên toàn bộ dữ liệu, sau khi bỏ canceled và unavailable, chỉ 7 đơn được duyệt sau hơn 14 ngày kể từ lúc mua.
+
+\textit{Nếu lỗi:} số nhỏ hơn 5 thường là do khi chép từ PDF, đầu dòng tiêu đề bị thêm dấu cách. Mỗi tiêu đề thẻ phải bắt đầu bằng \code{\#\#} ngay ở đầu dòng.
+
+\textbf{Bước 2: đọc biên bản phỏng vấn.} Đây là câu trả lời của BA cho ba câu hỏi đầu.
+
+\begin{ghichu}
+\begin{itemize}
+  \item \textbf{Câu 1.} ``Doanh thu là tiền hàng, không tính tiền ship. Đơn huỷ hay hết hàng thì không tính. Ngày là ngày khách đặt, theo giờ Brazil. Tôi xem lúc 8 giờ sáng và cần đủ số của hôm qua.''
+  \item \textbf{Câu 2.} ``Trễ là giao tới khách sau ngày hẹn, so theo ngày, không theo giờ. Đơn chưa giao thì để riêng, không tính là trễ hay đúng hẹn.''
+  \item \textbf{Câu 3.} ``Khách là một người mua thật, không phải một mã khách của từng đơn. Quay lại là có từ hai đơn trở lên, đơn ở trạng thái nào cũng tính.''
+\end{itemize}
+\end{ghichu}
+
+\textbf{Bước 3: viết thẻ cho câu 2 tới 5.} Mỗi thẻ có đủ các dòng như thẻ mẫu. Bảng dưới liệt kê điều mỗi thẻ phải chốt, kèm số trong repo cho thấy vì sao phải chốt.
+
+\begin{xltabular}{\textwidth}{@{}P{2.8cm} L P{4.8cm}@{}}
+\toprule
+\thd{câu hỏi} & \thd{thẻ phải chốt} & \thd{số trong repo} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+2. giao nhanh hay chậm & so theo ngày hay theo giờ; mẫu số có tính đơn chưa giao không & ngày hẹn luôn là 00:00:00; 2.965 đơn chưa giao (mục 9 hàng 19) \\
+3. khách quay lại & khách là \code{customer\_\allowbreak{}id} hay \code{customer\_\allowbreak{}unique\_\allowbreak{}id}; mấy đơn thì là quay lại & 99.441 \code{customer\_\allowbreak{}id} nhưng 96.096 người mua (mục 9 hàng 8) \\
+4. review theo người bán hay danh mục & đơn nhiều review lấy review nào; review của đơn nhiều người bán tính cho ai & 547 đơn có nhiều review (mục 9 hàng 4); 1.278 đơn có hơn một người bán \\
+5. bản đồ khách và người bán & toạ độ lấy theo zip thế nào; người không có toạ độ thì làm gì & 270 người mua và 8 người bán không có toạ độ (mục 9 hàng 13) \\
+\end{xltabular}
+% Kiểm: hoi.py ngày 06/11/2026: số order_id có hơn một seller_id khác nhau trong order_items là 1278; số đơn có hơn một review là 547, khớp mục 9 hàng 4.
+
+\textbf{Bước 4: kiểm ba thẻ bằng SQL.} Viết \code{lab\_\allowbreak{}m02/q1.sql}, \code{q2.sql} và \code{q3.sql} chỉ từ thẻ của bạn, không nhìn lại biên bản. File \code{q1.sql} tạo bảng tạm theo grain của thẻ, rồi chạy câu kiểm ngày 24/11/2017 trả về một dòng: số dòng, tổng, và dòng có doanh thu lớn nhất. File \code{q2.sql} đếm đơn trễ, đơn đúng hẹn và đơn chưa giao. File \code{q3.sql} đếm người mua, người quay lại và phần trăm làm tròn 2 chữ số.
+
+% chạy: L5 cần-lời-giải
+\begin{codeblock}
+for q in q1 q2 q3; do lakehouse/.venv/bin/python lab_m02/hoi.py lab_m02/$q.sql; done
+\end{codeblock}
+\textit{Kết quả, với lời giải tham khảo:}
+% kết quả: L5
+\begin{codeblock}
+┌─────────┬───────────────┬───────────────────┬────────────────────┐
+│ so_dong │     tong      │   dong_lon_nhat   │ doanh_thu_lon_nhat │
+│  int64  │ decimal(38,2) │      varchar      │   decimal(38,2)    │
+├─────────┼───────────────┼───────────────────┼────────────────────┤
+│     146 │     152653.74 │ bed_bath_table SP │           14717.34 │
+└─────────┴───────────────┴───────────────────┴────────────────────┘
+
+┌───────┬──────────┬───────────┐
+│  tre  │ dung_hen │ chua_giao │
+│ int64 │  int64   │   int64   │
+├───────┼──────────┼───────────┤
+│  6535 │    89941 │      2965 │
+└───────┴──────────┴───────────┘
+
+┌───────────┬──────────┬───────────┐
+│ nguoi_mua │ quay_lai │ phan_tram │
+│   int64   │  int64   │  double   │
+├───────────┼──────────┼───────────┤
+│     96096 │     2997 │      3.12 │
+└───────────┴──────────┴───────────┘
+\end{codeblock}
+
+Số của câu 2 và câu 3 khớp đúng \repo{docs/data-model.md} mục 9: 6.535 đơn trễ, 89.941 đơn đúng hẹn, 2.965 đơn chưa giao, và 2.997 người mua có hơn một \code{customer\_\allowbreak{}id}. Repo đã đi tới cùng định nghĩa đó cho cột \code{is\_\allowbreak{}delivered\_\allowbreak{}late}.
+% Nguồn: lakehouse/docs/data-model.md dòng 321 (hàng 8: 2.997 người mua) và dòng 332 (hàng 19: 6.535, 89.941, 2.965)
+% Kiểm: hoi.py ngày 06/11/2026, DuckDB 1.5.6: so order_delivered_customer_date > order_estimated_delivery_date theo timestamp ra 7827 đơn trễ; 99441 customer_id khác nhau cho 99441 đơn.
+
+\textit{Nếu lệch:} câu 2 ra 7.827 đơn trễ thì bạn đang so theo giờ, vì ngày hẹn luôn là 00:00 nên đơn giao lúc 10:00 đúng ngày hẹn bị tính là trễ. Câu 3 ra 0 người quay lại thì bạn đang đếm theo \code{customer\_\allowbreak{}id}, vì mỗi đơn có một \code{customer\_\allowbreak{}id} mới.
+
+\textbf{Bước 5: người đọc thứ hai.} Đưa thẻ câu 4 và câu 5 cho một người khác, hoặc tự đọc lại sau hai ngày. Người đó viết SQL chỉ từ thẻ, và hai bạn so số. Chỗ nào lệch là chỗ thẻ còn thiếu một quyết định; ghi quyết định đó vào thẻ rồi so lại.
+
+\hoanthanh{\code{yeu\_\allowbreak{}cau.md} có năm thẻ, thẻ nào cũng đủ người dùng, grain, metric, lọc, mốc cắt có cả ngày chốt, độ tươi và câu kiểm; \code{q1.sql} in 146 dòng, tổng 152.653,74 BRL, và dòng lớn nhất là \code{bed\_\allowbreak{}bath\_\allowbreak{}table} của bang SP với 14.717,34 BRL; \code{q2.sql} in 6.535, 89.941 và 2.965; \code{q3.sql} in 96.096, 2.997 và 3,12; người đọc thứ hai ra cùng số với bạn ở câu 4 và câu 5.}
+
+% =====================================================================
+\section{Lab 2.3: Chọn kho cho năm việc của Olist}
+
+Lab này chọn kho cho năm việc trên dữ liệu Olist. Hai việc đã có số đo từ Bài 2.
+
+\textbf{Bước 1: tìm review theo chữ.} \code{LIKE}, dù chạy trên kho nào, vẫn quét mọi bình luận và chỉ khớp theo chuỗi ký tự. Khối dưới nạp 40.977 bình luận vào SQLite hai lần: một bảng thường để tìm bằng \code{LIKE}, và một bảng FTS5 có index đảo ngược.
+% Kiểm: ngày 06/11/2026, DuckDB 1.5.6 một luồng, trung vị 7 lần đo sau một lần chạy nóng: LIKE '%não recebi%' trên cùng 40.977 bình luận mất 1,9 ms, SQLite LIKE 3,9 ms, FTS5 0,23 ms; LIKE của DuckDB phân biệt hoa thường nên chỉ thấy 1130 bình luận.
+
+% chạy: L6
+\begin{codeblock}
+lakehouse/.venv/bin/python - <<'EOF'
+import csv, sqlite3
+F = 'lakehouse/source_sim/data/olist_order_reviews_dataset.csv'
+binh_luan = [r['review_comment_message'] for r in csv.DictReader(open(F, newline=''))
+             if r['review_comment_message']]
+db = sqlite3.connect(':memory:')
+db.execute('CREATE TABLE review (msg TEXT)')
+db.execute('CREATE VIRTUAL TABLE review_fts USING fts5(msg)')  # index đảo ngược
+for bang in ['review', 'review_fts']:
+    db.executemany(f'INSERT INTO {bang} VALUES (?)', [(m,) for m in binh_luan])
+dem = lambda sql, *p: db.execute(sql, p).fetchall()[0][0]
+fts = 'SELECT count(*) FROM review_fts WHERE review_fts MATCH ?'
+print('bình luận:', len(binh_luan))
+like = "SELECT count(*) FROM review WHERE msg LIKE ?"
+print("LIKE '%não recebi%':", dem(like, '%não recebi%'))
+print('FTS5, cụm từ "nao recebi":', dem(fts, '"nao recebi"'))
+print("LIKE '%atras%':", dem(like, '%atras%'))
+print('FTS5, tiền tố atras*:', dem(fts, 'atras*'))
+EOF
+\end{codeblock}
+\textit{Kết quả:}
+% kết quả: L6
+\begin{codeblock}
+bình luận: 40977
+LIKE '%não recebi%': 1696
+FTS5, cụm từ "nao recebi": 2044
+LIKE '%atras%': 481
+FTS5, tiền tố atras*: 509
+\end{codeblock}
+
+\textit{Nếu lỗi:} \code{sqlite3.OperationalError: no such module: fts5} nghĩa là bạn không chạy bằng \repo{lakehouse/\allowbreak{}.venv/\allowbreak{}bin/\allowbreak{}python}.
+
+FTS5 thấy 2.044 bình luận, còn \code{LIKE} thấy 1.696; 1.673 bình luận có mặt ở cả hai. \textit{Bộ tách từ} (tokenizer) mặc định của FTS5 là \code{unicode61}: nó không phân biệt hoa thường theo Unicode và bỏ dấu của chữ Latin. Trong 371 bình luận chỉ FTS5 thấy, 264 bình luận gõ ``nao recebi'' không dấu, và 95 bình luận viết hoa ``NÃO''. \code{LIKE} so từng ký tự và chỉ không phân biệt hoa thường với chữ ASCII: với nó, ``a'' và ``Ã'' đều khác ``ã'', nên nó bỏ sót cả hai nhóm. Ngược lại, FTS5 khớp theo từ nguyên vẹn, nên bỏ qua 23 bình luận như ``não recebido'', còn \code{LIKE} bắt được chúng vì nó khớp theo chuỗi con. Viết \code{"nao recebi"*} thì FTS5 thấy 2.081 bình luận, gồm cả 1.696 bình luận của \code{LIKE}.
+% Nguồn: https://www.sqlite.org/fts5.html (unicode61 là tokenizer mặc định; remove_diacritics mặc định 1); https://www.sqlite.org/lang_expr.html (LIKE: "SQLite only understands upper/lower case for ASCII characters by default")
+% Kiểm: ngày 06/11/2026, Python 3.10.20, SQLite 3.50.4: 1673 bình luận khớp cả hai; 371 bình luận chỉ FTS5 thấy (264 có "nao recebi" không dấu, 95 có "NÃO" viết hoa trong cụm từ, 12 dạng khác như "näo", "Ñão", "recebí"); 23 bình luận chỉ LIKE thấy ("não recebido" 12, "não recebir" 6, "não recebimento" 4, "não recebie" 1); FTS5 '"nao recebi"*' thấy 2081, chứa cả 1696 của LIKE và 2044 của cụm từ.
+
+Bỏ dấu cũng có giá: tiền tố \code{atras*} khớp cả ``atrás'', nghĩa là ``trước đây'', chứ không chỉ ``atraso'' là trễ. Tìm theo chữ là một kiểu truy cập riêng, với bộ tách từ riêng, và index đảo ngược trả lời nhanh mà không quét. Trên máy viết bài, một câu FTS5 mất khoảng 0,2 ms, còn \code{LIKE} quét cả bảng mất khoảng 3,7 ms.
+% Kiểm: ngày 06/11/2026, Python 3.10.20, SQLite 3.50.4: tập bình luận khớp atras* mà không khớp LIKE '%atras%' chỉ chứa các dạng của "atrás" (21 "atrás", 4 "atrás,", 2 "atrás.", 1 "Atrás"); trung vị 7 lần đo: FTS5 "nao recebi" 0,21 ms, LIKE '%não recebi%' 3,7 ms.
+
+\textbf{Bước 2: điền bảng chọn kho.} Chép bảng dưới vào \code{lab\_\allowbreak{}m02/chon\_\allowbreak{}kho.md} và điền bốn dòng còn lại. Mỗi dòng cần một bằng chứng là con số: số đo ở Bài 2, số đếm ở bước 1, hoặc số dòng và nhịp chạy trong repo.
+
+\begin{xltabular}{\textwidth}{@{}P{2.4cm} P{2.4cm} P{2.6cm} P{2.2cm} L@{}}
+\toprule
+\thd{việc} & \thd{ai đọc, nhịp đọc} & \thd{kiểu truy cập} & \thd{kho chọn} & \thd{bằng chứng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+API tra đơn theo \code{order\_\allowbreak{}id} & app, nhiều lần mỗi giây & tra theo khoá & kho theo dòng có index, như PostgreSQL & Bài 2: SQLite tra nhanh hơn DuckDB khoảng 70 lần \\
+dashboard doanh thu & BA, mỗi sáng & & & \\
+tìm review theo chữ & đội chăm sóc khách, khi cần & & & \\
+metric độ tươi & người trực pipeline, mỗi 15 phút & & & \\
+tra toạ độ theo zip & dashboard bản đồ & & & \\
+\end{xltabular}
+
+Hai gợi ý. Metric độ tươi là một con số cho mỗi bảng sau mỗi lần Bronze chạy, tức 96 điểm mỗi bảng mỗi ngày. Tra toạ độ theo zip là tra theo khoá trên một bảng nhỏ: \repo{semantic.zip\_\allowbreak{}geo} có 19.010 zip. Hỏi thêm ai đọc nó: \repo{core.customers} đã có sẵn toạ độ cho dashboard, còn một API cho app thì cần kho khác.
+% Nguồn: lakehouse/airflow/dags/olist_bronze_ingest.py dòng 35 (schedule "*/15 * * * *", 24 x 4 = 96 lần mỗi ngày); lakehouse/docs/data-model.md mục 10 (semantic.zip_geo 19.010 dòng) và mục 11 (customer_lat, customer_lng)
+
+\textbf{Bước 3: viết lý do ngược.} Với mỗi dòng, thêm cột thứ sáu ``lý do ngược'' vào \code{chon\_\allowbreak{}kho.md} và ghi một câu: chuyện gì xảy ra nếu chọn kho của dòng bên cạnh. Ví dụ: đặt API tra đơn lên DuckDB thì mỗi lần tra tốn khoảng 160 µs thay vì 2 µs, đã gồm chi phí cố định của mỗi câu.
+
+\hoanthanh{khối ở bước 1 in đúng 40.977, 1.696, 2.044, 481 và 509; \code{chon\_\allowbreak{}kho.md} có đủ năm dòng, mỗi dòng có kiểu truy cập, kho chọn, một con số làm bằng chứng và một câu lý do ngược.}
+
+% =====================================================================
+\section{Thử thách kỹ năng}
 
 \begin{thuthach}
-Không có hướng dẫn từng bước. Đội vận hành của Olist muốn hai thứ: báo cáo doanh thu hằng ngày cho ban giám đốc, và cảnh báo trong vòng vài phút khi một đơn có nguy cơ giao trễ. Viết một bản ghi quyết định kiến trúc dài một tới hai trang: chọn batch, streaming, Lambda hay Kappa cho mỗi nhu cầu; chọn ETL hay ELT; vẽ các tầng raw, staging/core, marts; chỉ rõ công cụ nào của stack tham chiếu làm việc gì. Nêu ít nhất hai đánh đổi và một rủi ro.
-\hoanthanh{bản ghi có sơ đồ, mỗi lựa chọn có lý do dẫn được về một tài liệu chính thức trong module, và nếu chọn Lambda thì có phương án tránh viết logic hai lần.}
-\end{thuthach}
+Không có hướng dẫn từng bước. Đội vận hành Olist muốn hai thứ: báo cáo doanh thu theo ngày cho ban giám đốc trước 08:00 mỗi sáng, và cảnh báo trong vòng 10 phút khi một đơn có nguy cơ giao trễ. Viết một bản ghi quyết định kiến trúc dài một tới hai trang cho cả hai nhu cầu.
 
-\section{Câu hỏi tự kiểm tra}
+Bản ghi gồm: thẻ yêu cầu đủ năm phần cho mỗi nhu cầu; kho chọn theo kiểu truy cập, kèm một số đo; batch hay streaming; ETL hay ELT; tự viết hay mua phần nạp dữ liệu. Nêu ít nhất hai đánh đổi và một rủi ro.
+\hoanthanh{mỗi nhu cầu có đủ người dùng, grain, metric, mốc cắt và độ tươi; độ tươi được so với lịch thật của repo, và bản ghi nói lịch hiện tại có đạt không; mỗi lựa chọn có một lý do dẫn về một bài trong module hoặc một số đo; nếu chọn Lambda thì có cách tránh viết logic hai lần.}
+
+\textbf{Mang vào capstone:} thẻ yêu cầu của Lab 2.2 là đầu vào của mốc capstone 1 ở cuối Module 3, nơi bạn dựng star schema Gold cho đúng năm câu hỏi đó.
+\end{thuthach}
+% Nguồn: mốc 1 của lộ trình: bus matrix, grain và star schema Gold trên DuckDB cho năm câu hỏi
+
+% =====================================================================
+\section{Tự kiểm tra}
+
+Trả lời bằng lời của bạn trước, rồi mới đọc gợi ý.
 
 \begin{enumerate}
-  \item Kể các thành phần của một kiến trúc dữ liệu lớn theo Azure Architecture Center. Thành phần nào là orchestration?
-  \item Vì sao nên tách xử lý phân tích khỏi hệ OLTP?
-  \item ETL và ELT khác nhau ở đâu? Nêu một tình huống ETL vẫn hợp hơn.
-  \item Schema-on-write và schema-on-read là gì, và mỗi kiểu thuộc warehouse hay data lake?
-  \item Lakehouse thêm gì vào data lake? Open table format nằm ở đâu?
-  \item Iceberg có phải là engine truy vấn không? Kể ba engine đọc được bảng Iceberg trong stack tham chiếu.
-  \item Bronze, silver, gold chứa gì? Medallion có thay cho mô hình dữ liệu ở gold không?
-  \item Lambda có những layer nào? Nhược điểm chính của nó là gì?
-  \item Kappa tính lại toàn bộ dữ liệu bằng cách nào?
-  \item Khi nào batch đủ tốt và streaming là thừa? Cho hai tiêu chí.
+  \item Năm phần của một thẻ yêu cầu là gì? Phần nào hay bị quên nhất?\par
+  \textit{Gợi ý:} người dùng, grain, định nghĩa metric, mốc cắt, độ tươi. Hay quên ngày chốt trong mốc cắt, vì số đơn tháng 2/2017 đã giao còn tăng từ 907 lên 1.653.
+  \item Vì sao ``đơn giao sau 01/03/2017'' có ít nhất ba đáp án?\par
+  \textit{Gợi ý:} từ đầu hay từ cuối ngày 01/03 cho 746 hay 673; tính cả đơn chưa giao thì ra 873.
+  \item Làm sao biết các mốc của Olist là giờ Brazil khi file không ghi múi giờ?\par
+  \textit{Gợi ý:} 85 review mang 01:00 đúng hai ngày Brazil bắt đầu giờ mùa hè, và ít đơn nhất lúc 4 tới 5 giờ sáng.
+  \item Vì sao DuckDB tra theo khoá chậm hơn SQLite mà gộp lại nhanh hơn?\par
+  \textit{Gợi ý:} khi tra, SQLite có B-tree dẫn thẳng tới dòng, còn DuckDB quét cả cột \code{order\_\allowbreak{}id} và trả chi phí cố định mỗi câu. Khi gộp, DuckDB tính theo lô trên kiểu \code{TIMESTAMP}, còn SQLite xử lý từng dòng và đọc mốc thời gian từ chữ; đọc ít cột giúp ít khi dữ liệu nằm trong RAM.
+  \item Độ tươi khác độ trễ của API ở đâu?\par
+  \textit{Gợi ý:} độ tươi đo tuổi của dữ liệu mới nhất; pipeline trễ không sinh lỗi nào, dashboard vẫn nhanh nhưng số cũ.
+  \item Khi luật doanh thu đổi, vì sao ELT chỉ cần chạy lại SQL còn ETL phải đọc lại nguồn?\par
+  \textit{Gợi ý:} ELT giữ dữ liệu thô trong kho; kho của ETL chỉ có bảng kết quả, không còn \code{freight\_\allowbreak{}value}.
+  \item Medallion có thay cho mô hình dữ liệu ở gold không?\par
+  \textit{Gợi ý:} không; Databricks gọi medallion là thực hành được khuyên, không bắt buộc, và gold vẫn cần dimensional model.
 \end{enumerate}
 
-\section{Điểm dễ nhầm}
+% =====================================================================
+\section{Đọc thêm}
 
-\begin{xltabular}{\textwidth}{@{}P{3.8cm} L P{3.4cm}@{}}
+Đọc sau khi làm xong các lab, để gắn tên chuẩn cho những gì bạn đã tự làm.
+
+\begin{itemize}
+  \item \href{https://www.oreilly.com/library/view/fundamentals-of-data/9781098108298/}{Fundamentals of Data Engineering}, sách của Joe Reis và Matt Housley, bản in 2022: đọc chương 2 về vòng đời và undercurrent, và mục Build Versus Buy ở chương 4, khoảng 2 giờ. Đây là khung mà Bài 6 và Bài 8 dùng.
+  % Nguồn: http://web.archive.org/web/20260330095128/https://www.oreilly.com/library/view/fundamentals-of-data/9781098108298/ (bản lưu của trang O'Reilly, trang gốc trả 403 cho công cụ tải)
+  \item \href{https://martin.kleppmann.com/2026/03/24/designing-data-intensive-applications-2e.html}{Designing Data-Intensive Applications, bản 2}, sách của Martin Kleppmann và Chris Riccomini, 2026: ở chương 4, đọc mục ``Column-Oriented Storage'' và mục ``Query Execution: Compilation and Vectorization'', khoảng 1,5 giờ, để hiểu vì sao DuckDB gộp nhanh ở Bài 2.
+  % Kiểm: curl ngày 06/11/2026 bản lưu web.archive.org/web/20260616232347 của trang O'Reilly 9781098119058: chương 4 Storage and Retrieval, phần Data Storage for Analytics, có Column-Oriented Storage và Query Execution: Compilation and Vectorization.
+  \item \href{https://sre.google/workbook/data-processing/}{SRE Workbook, chương Data Processing Pipelines}, sách của Google SRE: đọc phần SLO độ tươi và độ đúng, khoảng 45 phút. Bản web không ghi ngày; đây là nguồn của cách viết độ tươi ở Bài 1.
+  \item \href{https://martinfowler.com/articles/data-mesh-principles.html}{Data Mesh Principles and Logical Architecture}, bài viết của Zhamak Dehghani, 03/12/2020: đọc phần bốn nguyên tắc, khoảng 45 phút, nếu bạn muốn hiểu Bài 7 kỹ hơn một đoạn.
+  \item \href{https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures}{Azure Architecture Center: Big data architectures}, bản ngày 12/09/2025: đọc phần Lambda, Kappa và Lakehouse, khoảng 30 phút, để thấy vì sao Lambda phải viết logic hai lần còn Kappa thì không.
+  \item \href{https://docs.databricks.com/aws/en/lakehouse/medallion}{Databricks: Medallion architecture}, bản cập nhật 29/10/2026: cả trang, khoảng 15 phút, để so ba tầng của Databricks với các namespace của repo.
+  \item \href{https://www.getdbt.com/what-is-analytics-engineering}{What is analytics engineering?}, bài viết của Claire Carroll, 26/03/2019: cả bài, khoảng 15 phút, để thấy vai analytics engineer ra đời từ đâu.
+\end{itemize}
+% Kiểm: tổng giờ đọc thêm 2 + 1,5 + 0,75 + 0,75 + 0,5 + 0,25 + 0,25 = 6 giờ, khớp dòng Giờ của thẻ module.
+
+% =====================================================================
+\section{Kế hoạch theo tuần}
+
+Module này có 13 giờ và học song song với Module 3 được, nên tuần 2 còn 5 giờ cho Module 3.
+
+\begin{xltabular}{\textwidth}{@{}P{1.4cm} L P{3.6cm} P{1.2cm}@{}}
 \toprule
-\thd{điểm dễ nhầm} & \thd{thực tế} & \thd{docs chính thức} \\
+\thd{tuần} & \thd{việc lõi} & \thd{thêm nếu còn giờ} & \thd{giờ} \\
 \midrule
 \endhead
 \bottomrule
 \endfoot
-Nhiều người nghĩ ELT đã thay hẳn ETL & ELT là mặc định cho phân tích hiện đại, nhưng ETL vẫn hợp với hệ cũ có định dạng cố định và tải ở biên, IoT & \href{https://aws.amazon.com/compare/the-difference-between-etl-and-elt/}{AWS: ETL vs ELT} \\
-Lakehouse là một sản phẩm mua về & Lakehouse là một kiến trúc dữ liệu: lưu trữ rẻ của data lake cộng quản lý kiểu warehouse như ACID và schema enforcement & \href{https://cloud.google.com/discover/what-is-a-data-lakehouse}{Google Cloud: lakehouse} \\
-Medallion là một phương pháp mô hình hoá & Medallion chia lớp theo chất lượng dữ liệu; mô hình hoá (dimensional model) vẫn phải làm ở gold & \href{https://docs.databricks.com/aws/en/lakehouse/medallion}{Databricks: Medallion} \\
-Lambda tốt hơn vì có cả hai đường & Hai đường nghĩa là logic nằm hai nơi, hai framework, khó quản lý & \href{https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures}{Azure: Big data architectures} \\
-Kappa không tính lại được dữ liệu lịch sử & Kappa phát lại stream từ log để tính lại toàn bộ & \href{https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures}{Azure: Big data architectures} \\
-Iceberg là một cơ sở dữ liệu & Iceberg là table format; các engine như Spark, Trino, Flink đọc ghi bảng Iceberg & \href{https://iceberg.apache.org/docs/latest/}{Iceberg docs} \\
-Data lake chỉ là warehouse rẻ hơn & Data lake là schema-on-read, nhận mọi kiểu dữ liệu; warehouse là schema-on-write, dữ liệu có cấu trúc & \href{https://cloud.google.com/discover/what-is-a-data-lakehouse}{Google Cloud: lakehouse} \\
+1 & Vấn đề thật và Bài 1, 2 giờ; Lab 2.1, 1 giờ; Lab 2.2, 2,5 giờ; Bài 2, 2 giờ; Lab 2.3, 1 giờ; Bài 3, 0,5 giờ & chương 2 của Fundamentals of Data Engineering & 9 \\
+2 & Bài 4, 0,5 giờ; Bài 5, 0,75 giờ; Bài 6 và bài kiểm 15 phút, 0,5 giờ; Bài 7, 0,25 giờ; Bài 8, 0,5 giờ; Tự kiểm tra, 0,25 giờ; thử thách kỹ năng, 1,25 giờ & phần còn lại của Đọc thêm & 4 \\
 \end{xltabular}
