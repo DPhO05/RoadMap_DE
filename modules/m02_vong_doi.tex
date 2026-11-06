@@ -1,0 +1,163 @@
+\modulechapter{2}{Vòng đời Data Engineering và kiến trúc dữ liệu}
+\moduleinfo{Cơ bản}{15 giờ}{Module 1 (có thể học song song với Module 3)}
+
+Trước khi học từng công cụ, bạn cần một bộ từ vựng chung để gọi tên từng phần của một nền tảng dữ liệu. Module này đi qua vòng đời dữ liệu từ hệ thống nguồn tới người dùng cuối, các kiểu xử lý batch và streaming, ETL và ELT, và ba kiểu kho: data warehouse, data lake, lakehouse. Bạn cũng đặt từng thành phần của stack tham chiếu (RustFS, Iceberg REST catalog, Spark, Airflow, Trino, Metabase, Kafka, Flink) vào đúng chỗ của nó. Học xong, bạn vẽ và giải thích được kiến trúc của lakehouse Olist mà các module sau sẽ xây.
+
+\section{Bạn sẽ học được}
+
+\begin{itemize}
+  \item Kể các thành phần của một kiến trúc dữ liệu lớn và đặt mỗi công cụ của stack tham chiếu vào một thành phần.
+  \item Phân biệt ETL với ELT theo nơi diễn ra biến đổi, và chọn được cách nào cho một tình huống.
+  \item So sánh data warehouse, data lake và lakehouse theo kiểu dữ liệu, schema-on-write hay schema-on-read, và chi phí lưu trữ.
+  \item Giải thích kiến trúc Lambda và Kappa, và nhược điểm chính của Lambda.
+  \item Giải thích medallion (bronze, silver, gold) và quan hệ của nó với tầng raw, staging/core, marts.
+  \item Mô tả vai trò của open table format như Apache Iceberg trong một lakehouse.
+\end{itemize}
+
+\section{Nội dung chính}
+
+\begin{enumerate}
+  \item \textbf{Thành phần của một kiến trúc dữ liệu.} Azure Architecture Center liệt kê: nguồn dữ liệu, lưu trữ (thường là data lake), xử lý batch, ingestion thời gian thực qua một bộ đệm thông điệp, xử lý stream, kho phân tích, phân tích và báo cáo, và orchestration để tự động hoá các luồng lặp lại. Một giải pháp không nhất thiết có đủ mọi thành phần (\href{https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures}{Azure: Big data architectures}). Trong lộ trình này, vòng đời được gọi gọn: nguồn → ingestion → lưu trữ → biến đổi → phục vụ, với orchestration, chất lượng dữ liệu và bảo mật chạy xuyên suốt.
+  \item \textbf{Hệ thống nguồn và tải phân tích.} Hệ OLTP phục vụ giao dịch thời gian thực; xử lý phân tích nên tách khỏi OLTP để không ảnh hưởng tải giao dịch (\href{https://docs.aws.amazon.com/whitepapers/latest/data-warehousing-on-aws/data-processing.html}{AWS: Data processing}). Đây là lý do có pipeline đưa dữ liệu từ nguồn vào kho phân tích.
+  \item \textbf{ETL và ELT.} ETL biến đổi dữ liệu trên một máy xử lý riêng trước khi nạp vào đích. ELT nạp nguyên trạng rồi biến đổi trong chính hệ đích, tận dụng sức tính của nó và giữ dữ liệu thô để biến đổi lại khi cần. AWS coi ELT là mặc định cho phân tích hiện đại, nhưng ETL vẫn hợp với cơ sở dữ liệu cũ có định dạng cố định hoặc tải ở biên, IoT, nơi dữ liệu cần lọc trước khi lên cloud (\href{https://aws.amazon.com/compare/the-difference-between-etl-and-elt/}{AWS: ETL vs ELT}).
+  \item \textbf{Data warehouse, data lake, lakehouse.} Warehouse giữ dữ liệu có cấu trúc, schema-on-write, phục vụ BI. Data lake giữ mọi kiểu dữ liệu trên lưu trữ rẻ, schema-on-read. Lakehouse ghép hai thứ: lưu trữ đối tượng giá rẻ cho mọi kiểu dữ liệu, cộng các chức năng quản lý như ACID transaction và schema enforcement, với lưu trữ tách khỏi tính toán (\href{https://cloud.google.com/discover/what-is-a-data-lakehouse}{Google Cloud: What is a data lakehouse}).
+  \item \textbf{Open table format.} Apache Iceberg là open table format cho tập dữ liệu phân tích lớn: nó thêm vào data lake các khả năng kiểu warehouse như time travel và tiến hoá schema, để nhiều engine mã nguồn mở cùng đọc ghi một bảng trên object storage (\href{https://iceberg.apache.org/docs/latest/}{Iceberg docs}; \href{https://cloud.google.com/discover/what-is-a-data-lakehouse}{Google Cloud}). Iceberg không phải engine: Spark, Trino, Flink, PyIceberg, DuckDB mới là thứ chạy truy vấn.
+  \item \textbf{Medallion.} Databricks mô tả medallion là một mẫu thiết kế dữ liệu, chia dữ liệu thành các lớp theo chất lượng: bronze chứa dữ liệu thô chưa kiểm, silver chứa dữ liệu đã kiểm, làm sạch và làm giàu, gold chứa các view tinh chỉnh phục vụ phân tích; ở gold, bạn mô hình hoá bằng dimensional model. Medallion là thực hành được khuyến nghị, không bắt buộc (\href{https://docs.databricks.com/aws/en/lakehouse/medallion}{Databricks: Medallion}). Lộ trình này gọi ba lớp là raw (bronze), staging/core (silver), marts (gold); tên staging và marts trùng với cách dbt chia dự án (\href{https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview}{dbt: How we structure our dbt projects}).
+  \item \textbf{Batch và streaming; Lambda và Kappa.} Batch xử lý dữ liệu theo lô định kỳ; streaming xử lý từng sự kiện khi nó tới, cho độ trễ thấp. Lambda chạy hai đường: batch layer (cold path) giữ toàn bộ dữ liệu thô và tính batch view; speed layer (hot path) phân tích thời gian thực, đánh đổi độ chính xác lấy độ trễ; serving layer phục vụ truy vấn. Nhược điểm chính là logic xử lý nằm ở hai nơi với hai framework. Kappa cho mọi dữ liệu đi một đường qua hệ xử lý stream, ghi vào một log phân tán; khi cần tính lại toàn bộ thì phát lại (replay) stream (\href{https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures}{Azure: Big data architectures}).
+  \item \textbf{Ai làm gì.} Data engineer xây và vận hành pipeline, lưu trữ và orchestration. Phần biến đổi dữ liệu trong kho thành mô hình sẵn cho phân tích, viết như phần mềm (có version control, test), thường được gọi là analytics engineering; DE Zoomcamp dành riêng một module cho nó. Data analyst và data scientist dùng dữ liệu ở tầng phục vụ.
+\end{enumerate}
+
+\section{Bắt đầu}
+
+\begin{itemize}
+  \item Đọc \href{https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures}{Azure: Big data architectures}, phần thành phần và phần Lambda, Kappa (1 giờ).
+  \item Đọc \href{https://cloud.google.com/discover/what-is-a-data-lakehouse}{Google Cloud: What is a data lakehouse}, bảng so sánh warehouse, lake, lakehouse (0,5 giờ).
+  \item Xem tuần đầu của khoá “Introduction to Data Engineering” trên Coursera ở chế độ audit (mục Khoá học miễn phí).
+\end{itemize}
+
+\section{Tài liệu chính thức}
+
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{1.8cm}@{}}
+\toprule
+\thd{tài liệu} & \thd{nội dung cần đọc} & \thd{thời lượng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures}{Azure: Big data architectures} & thành phần; Lambda, Kappa; khi nào dùng kiến trúc dữ liệu lớn & 1,5 giờ \\
+\href{https://aws.amazon.com/compare/the-difference-between-etl-and-elt/}{AWS: ETL vs ELT} & định nghĩa, khác biệt, khi nào dùng & 0,5 giờ \\
+\href{https://docs.aws.amazon.com/whitepapers/latest/data-warehousing-on-aws/data-processing.html}{AWS: Data processing} & OLTP, OLAP và vì sao tách xử lý phân tích & 0,3 giờ \\
+\href{https://cloud.google.com/discover/what-is-a-data-lakehouse}{Google Cloud: What is a data lakehouse} & định nghĩa, bảng so sánh, các lớp của lakehouse & 0,5 giờ \\
+\href{https://docs.databricks.com/aws/en/lakehouse/medallion}{Databricks: Medallion architecture} & bronze, silver, gold; mô hình ở gold & 0,5 giờ \\
+\href{https://iceberg.apache.org/docs/latest/}{Apache Iceberg docs} & trang giới thiệu; danh sách tính năng & 0,5 giờ \\
+\href{https://docs.getdbt.com/best-practices/how-we-structure/1-guide-overview}{dbt: How we structure our dbt projects} & staging, intermediate, marts & 1 giờ \\
+\end{xltabular}
+
+\section{Khoá học miễn phí}
+
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{3.2cm}@{}}
+\toprule
+\thd{khoá học} & \thd{nội dung} & \thd{miễn phí phần nào} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://www.coursera.org/professional-certificates/data-engineering}{DeepLearning.AI Data Engineering Professional Certificate} (Coursera, với AWS) & 4 khoá: Introduction to Data Engineering (18 giờ); Source Systems, Data Ingestion, and Pipelines; Data Storage and Queries; Data Modeling, Transformation, and Serving. Lab xây dựng trên AWS. Module này chỉ cần khoá 1 & audit miễn phí nhưng không có chứng chỉ; chứng chỉ cần gói Coursera (\$49/tháng theo trang khoá) hoặc hỗ trợ tài chính \\
+\href{https://github.com/DataTalksClub/data-engineering-zoomcamp}{DE Zoomcamp} (DataTalksClub) & container và IaC, orchestration, data warehouse, analytics engineering, batch, streaming, dự án cuối. Module này chỉ cần đọc tổng quan các module & toàn bộ video, tài liệu, bài tập miễn phí; chứng chỉ chỉ cấp cho người hoàn thành dự án trong cohort trực tiếp (cohort kế tiếp bắt đầu 01/2027) \\
+\end{xltabular}
+
+\section{Lab thực hành}
+
+\subsection{Lab 2.1: Bản đồ vòng đời của lakehouse Olist}
+
+\begin{enumerate}
+  \item Liệt kê các bảng CSV của Olist và giả định chúng đến từ một hệ OLTP thương mại điện tử.
+  \item Vẽ sơ đồ (giấy, draw.io hay Excalidraw đều được) từ nguồn tới Metabase, gồm: ingestion batch, ingestion stream qua Kafka, object storage RustFS, Iceberg REST catalog, Spark và Flink để biến đổi, Trino để truy vấn, Metabase để báo cáo, Airflow để orchestration.
+  \item Lập bảng: mỗi công cụ một dòng, cột là thành phần theo Azure Architecture Center, tầng medallion nó đọc và ghi, batch hay stream.
+  \item Đánh dấu các mối quan tâm xuyên suốt sơ đồ chưa có: chất lượng dữ liệu, lineage, bảo mật, giám sát.
+\end{enumerate}
+
+\hoanthanh{bạn có một sơ đồ và một bảng, mọi công cụ của stack tham chiếu xuất hiện đúng một lần trong bảng, và mỗi tầng raw, staging/core, marts có ít nhất một công cụ ghi vào.}
+
+\subsection{Lab 2.2: Cùng một kết quả bằng ETL và bằng ELT}
+
+\begin{enumerate}
+  \item ETL: viết một script Python dùng DuckDB làm bộ xử lý bên ngoài, đọc \code{olist\_\allowbreak{}orders\_\allowbreak{}dataset.csv} và \code{olist\_\allowbreak{}order\_\allowbreak{}items\_\allowbreak{}dataset.csv}, tính doanh thu theo ngày, rồi chỉ ghi kết quả ra \code{marts/daily\_\allowbreak{}revenue.parquet}.
+  \item ELT: nạp nguyên hai CSV vào một file DuckDB làm “kho” (\code{raw\_\allowbreak{}orders}, \code{raw\_\allowbreak{}items}), rồi tạo bảng doanh thu theo ngày bằng SQL ngay trong kho.
+\begin{codeblock}
+CREATE TABLE raw_orders AS SELECT * FROM read_csv('olist/olist_orders_dataset.csv');
+CREATE TABLE raw_items  AS SELECT * FROM read_csv('olist/olist_order_items_dataset.csv');
+CREATE TABLE daily_revenue AS
+SELECT CAST(o.order_purchase_timestamp AS DATE) AS order_date,
+       sum(i.price) AS revenue
+FROM raw_orders o JOIN raw_items i USING (order_id)
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY ALL;
+\end{codeblock}
+  \item Đổi định nghĩa doanh thu (cộng thêm \code{freight\_\allowbreak{}value}). Ghi lại cách nào phải đọc lại nguồn và cách nào chỉ cần chạy lại SQL trên dữ liệu thô đã có.
+\end{enumerate}
+
+\hoanthanh{hai cách cho cùng bảng doanh thu theo ngày (so bằng \code{EXCEPT} ra 0 dòng), và bạn viết được ba câu giải thích nơi biến đổi diễn ra trong mỗi cách và vì sao ELT dễ đổi định nghĩa hơn.}
+
+\subsection{Lab 2.3: Ba tầng raw, staging, marts trên file}
+
+\begin{enumerate}
+  \item \code{raw/}: chép nguyên CSV, không sửa.
+  \item \code{staging/}: với DuckDB, đọc CSV, ép kiểu ngày giờ, đổi tên cột nếu cần, khử trùng theo khoá logic, ghi Parquet bằng \code{COPY ... TO 'staging/orders.parquet' (FORMAT parquet)}.
+  \item \code{marts/}: tạo một bảng tổng hợp doanh thu theo tháng và bang từ Parquet ở staging.
+  \item Viết ba câu kiểm: số dòng staging bằng số khoá logic ở raw; không có \code{order\_\allowbreak{}id} NULL; tổng doanh thu ở marts bằng tổng tính trực tiếp từ staging.
+\end{enumerate}
+
+\hoanthanh{ba thư mục có dữ liệu, ba câu kiểm đều đạt, và một đoạn ngắn ánh xạ mỗi thư mục với bronze, silver, gold theo định nghĩa của Databricks.}
+
+\section{Kế hoạch theo tuần}
+
+\begin{xltabular}{\textwidth}{@{}P{1.4cm} L P{1.6cm}@{}}
+\toprule
+\thd{tuần} & \thd{việc} & \thd{giờ} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & Azure Big data architectures; AWS ETL vs ELT, Data processing; Google lakehouse; tuần đầu khoá Coursera (audit); Lab 2.1, Lab 2.2 & 10 \\
+2 & Databricks medallion; Iceberg docs; dbt How we structure; Lab 2.3; thử thách kỹ năng & 5 \\
+thêm & phần còn lại khoá 1 Coursera; đọc tổng quan module DE Zoomcamp & 10 tới 15 \\
+\end{xltabular}
+
+\begin{thuthach}
+Không có hướng dẫn từng bước. Đội vận hành của Olist muốn hai thứ: báo cáo doanh thu hằng ngày cho ban giám đốc, và cảnh báo trong vòng vài phút khi một đơn có nguy cơ giao trễ. Viết một bản ghi quyết định kiến trúc dài một tới hai trang: chọn batch, streaming, Lambda hay Kappa cho mỗi nhu cầu; chọn ETL hay ELT; vẽ các tầng raw, staging/core, marts; chỉ rõ công cụ nào của stack tham chiếu làm việc gì. Nêu ít nhất hai đánh đổi và một rủi ro.
+\hoanthanh{bản ghi có sơ đồ, mỗi lựa chọn có lý do dẫn được về một tài liệu chính thức trong module, và nếu chọn Lambda thì có phương án tránh viết logic hai lần.}
+\end{thuthach}
+
+\section{Câu hỏi tự kiểm tra}
+
+\begin{enumerate}
+  \item Kể các thành phần của một kiến trúc dữ liệu lớn theo Azure Architecture Center. Thành phần nào là orchestration?
+  \item Vì sao nên tách xử lý phân tích khỏi hệ OLTP?
+  \item ETL và ELT khác nhau ở đâu? Nêu một tình huống ETL vẫn hợp hơn.
+  \item Schema-on-write và schema-on-read là gì, và mỗi kiểu thuộc warehouse hay data lake?
+  \item Lakehouse thêm gì vào data lake? Open table format nằm ở đâu?
+  \item Iceberg có phải là engine truy vấn không? Kể ba engine đọc được bảng Iceberg trong stack tham chiếu.
+  \item Bronze, silver, gold chứa gì? Medallion có thay cho mô hình dữ liệu ở gold không?
+  \item Lambda có những layer nào? Nhược điểm chính của nó là gì?
+  \item Kappa tính lại toàn bộ dữ liệu bằng cách nào?
+  \item Khi nào batch đủ tốt và streaming là thừa? Cho hai tiêu chí.
+\end{enumerate}
+
+\section{Điểm dễ nhầm}
+
+\begin{xltabular}{\textwidth}{@{}P{3.8cm} L P{3.4cm}@{}}
+\toprule
+\thd{điểm dễ nhầm} & \thd{thực tế} & \thd{docs chính thức} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Nhiều người nghĩ ELT đã thay hẳn ETL & ELT là mặc định cho phân tích hiện đại, nhưng ETL vẫn hợp với hệ cũ có định dạng cố định và tải ở biên, IoT & \href{https://aws.amazon.com/compare/the-difference-between-etl-and-elt/}{AWS: ETL vs ELT} \\
+Lakehouse là một sản phẩm mua về & Lakehouse là một kiến trúc dữ liệu: lưu trữ rẻ của data lake cộng quản lý kiểu warehouse như ACID và schema enforcement & \href{https://cloud.google.com/discover/what-is-a-data-lakehouse}{Google Cloud: lakehouse} \\
+Medallion là một phương pháp mô hình hoá & Medallion chia lớp theo chất lượng dữ liệu; mô hình hoá (dimensional model) vẫn phải làm ở gold & \href{https://docs.databricks.com/aws/en/lakehouse/medallion}{Databricks: Medallion} \\
+Lambda tốt hơn vì có cả hai đường & Hai đường nghĩa là logic nằm hai nơi, hai framework, khó quản lý & \href{https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures}{Azure: Big data architectures} \\
+Kappa không tính lại được dữ liệu lịch sử & Kappa phát lại stream từ log để tính lại toàn bộ & \href{https://learn.microsoft.com/en-us/azure/architecture/databases/guide/big-data-architectures}{Azure: Big data architectures} \\
+Iceberg là một cơ sở dữ liệu & Iceberg là table format; các engine như Spark, Trino, Flink đọc ghi bảng Iceberg & \href{https://iceberg.apache.org/docs/latest/}{Iceberg docs} \\
+Data lake chỉ là warehouse rẻ hơn & Data lake là schema-on-read, nhận mọi kiểu dữ liệu; warehouse là schema-on-write, dữ liệu có cấu trúc & \href{https://cloud.google.com/discover/what-is-a-data-lakehouse}{Google Cloud: lakehouse} \\
+\end{xltabular}

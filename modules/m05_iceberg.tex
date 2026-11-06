@@ -1,0 +1,278 @@
+\modulechapter{5}{Open table format: Apache Iceberg}
+\moduleinfo{Trung cấp tới nâng cao}{35 giờ}{Module 4}
+
+Module 4 cho thấy object storage không có cập nhật nguyên tử trên nhiều key và không có rename nguyên tử. Apache Iceberg bù vào bằng một cây metadata bất biến và một thao tác duy nhất: đổi nguyên tử con trỏ tới file metadata hiện tại. Module này đi từ đặc tả (metadata file, manifest list, manifest, sequence number, commit) tới vận hành (time travel, schema và partition evolution, xoá theo dòng, bảo trì, branch và tag). Học xong, bạn ghi được dữ liệu Olist vào Iceberg bằng PyIceberg và Spark, đọc được mọi file metadata nó tạo ra, và giữ bảng khoẻ mạnh bằng các thủ tục bảo trì.
+
+\section{Bạn sẽ học được}
+\begin{itemize}
+  \item Vẽ cây metadata của Iceberg và nói được ai ghi file nào khi dùng REST catalog và khi dùng catalog kiểu JDBC hoặc Hive.
+  \item Giải thích optimistic concurrency: đổi nguyên tử con trỏ, luật retry, vai trò của sequence number, và ý nghĩa của mã lỗi 409 so với 5xx trong REST catalog.
+  \item Dùng time travel, schema evolution, hidden partitioning và partition evolution trên Spark và PyIceberg.
+  \item Chọn copy-on-write hay merge-on-read; phân biệt position delete, equality delete và deletion vector của v3.
+  \item Chạy và giải thích bốn thủ tục bảo trì: \code{expire\_snapshots}, \code{rewrite\_data\_files}, \code{rewrite\_manifests}, \code{remove\_orphan\_files}.
+  \item Đọc metadata table (\code{snapshots}, \code{manifests}, \code{entries}, \code{files}) để chẩn đoán bảng.
+  \item Dùng branch và tag cho write-audit-publish, và so sánh ngắn Iceberg với Delta Lake, Apache Hudi.
+\end{itemize}
+
+\section{Nội dung chính}
+
+\subsection{Cấu trúc bảng}
+\begin{enumerate}
+  \item \textbf{Vì sao cần table format.} Bảng kiểu Hive giữ partition trong metastore và file trong file system, nên không đổi được nội dung bảng một cách nguyên tử. Iceberg theo dõi danh sách đầy đủ data file của bảng trong từng snapshot (\href{https://iceberg.apache.org/docs/latest/reliability/}{Iceberg: Reliability}).
+  \item \textbf{Cây metadata.} Catalog giữ con trỏ tới file \code{metadata.json} hiện tại. File này (JSON) chứa schema, partition spec, sort order, danh sách snapshot, \code{snapshot-log}, ref (branch, tag) và table property. Mỗi snapshot trỏ tới một manifest list; manifest list liệt kê các manifest; manifest là file Avro bất biến liệt kê data file hoặc delete file kèm partition và thống kê cột (\href{https://iceberg.apache.org/spec/}{Iceberg spec}). Data file là Parquet, Avro hoặc ORC.
+  \item \textbf{Thống kê cột trong manifest.} Iceberg ghi bound của cột vào manifest theo \code{write.metadata.\allowbreak metrics.default}, mặc định \code{truncate(16)}: cột chuỗi chỉ giữ 16 ký tự đầu làm bound; mặc định chỉ thu metrics cho 100 cột đầu (\code{write.metadata.\allowbreak metrics.max-inferred-\allowbreak column-defaults}, \href{https://iceberg.apache.org/docs/latest/configuration/}{Configuration}). Vì vậy min/max trong footer Parquet (Module 4) và bound trong manifest là hai chỗ khác nhau, có thể khác giá trị.
+  \item \textbf{Format version.} Theo đặc tả, v1, v2, v3 đã hoàn chỉnh và được cộng đồng thông qua; v4 đang phát triển và chưa được thông qua. v3 thêm kiểu dữ liệu mới, giá trị mặc định cho cột, transform nhiều tham số, row lineage, deletion vector nhị phân và khoá mã hoá bảng (\href{https://iceberg.apache.org/spec/}{Iceberg spec}). Bảng mới mặc định \code{format-version = 2} từ Iceberg 1.4.0 (\href{https://iceberg.apache.org/docs/latest/configuration/}{Configuration}). Engine có thể chưa làm đủ tính năng v3; xem docs của engine trước khi nâng.
+\end{enumerate}
+
+\subsection{Commit và concurrency}
+\begin{enumerate}[resume]
+  \item \textbf{Optimistic concurrency.} Đặc tả viết: việc đổi nguyên tử một file metadata lấy một file khác là nền của serializable isolation. Writer tạo metadata mới dựa trên phiên bản hiện tại; nếu phiên bản đó đã cũ khi commit, writer phải thử lại dựa trên phiên bản mới. Một số thao tác áp lại được: append áp lên snapshot mới được, rewrite áp lại được nếu mọi file bị thay vẫn còn trong bảng (\href{https://iceberg.apache.org/spec/}{Iceberg spec}, mục Optimistic Concurrency). Số lần thử lại mặc định \code{commit.retry.num-retries = 4} (\href{https://iceberg.apache.org/docs/latest/configuration/}{Configuration}).
+  \item \textbf{Sequence number.} Manifest mới thừa kế sequence number từ metadata của manifest list, nên manifest được ghi một lần và dùng lại khi retry; muốn đổi sequence number cho lần thử mới thì chỉ cần ghi lại manifest list (\href{https://iceberg.apache.org/spec/}{Iceberg spec}). Sequence number cũng quyết định delete file nào áp lên data file nào.
+  \item \textbf{Mức isolation cho ghi theo dòng.} \code{write.delete.\allowbreak isolation-level}, \code{write.update.\allowbreak isolation-level}, \code{write.merge.\allowbreak isolation-level} mặc định \code{serializable}, có thể đặt \code{snapshot}; các property này áp cho lệnh delete, update, merge (\href{https://iceberg.apache.org/docs/latest/configuration/}{Configuration}).
+  \item \textbf{Commit với catalog kiểu metastore.} Với JDBC, Hive và các catalog tương tự, chính client ghi file metadata mới (đặc tả mô tả tên \code{<V+1>-<uuid>.metadata.json}) rồi nhờ catalog đổi con trỏ bằng check-and-put. Bảng kiểu file system (Hadoop catalog) commit bằng rename; đặc tả ghi cách này không an toàn trên object store và file system cục bộ, và sẽ bỏ ở v4 (\href{https://iceberg.apache.org/spec/}{Iceberg spec}).
+  \item \textbf{Commit qua REST catalog.} Client gửi \code{CommitTableRequest} gồm định danh bảng, \code{requirements} (ví dụ \code{assert-ref-snapshot-id}) và \code{updates} (ví dụ \code{add-snapshot}, \code{set-snapshot-ref}) tới endpoint \code{updateTable}. Server kiểm requirement, áp update lên metadata hiện tại, tự ghi \code{metadata.json} mới, đổi con trỏ, rồi trả metadata mới (\href{https://iceberg.apache.org/rest-catalog-spec/}{REST Catalog Spec}, \href{https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml}{OpenAPI}). PyIceberg ánh xạ 409 thành \code{CommitFailed\allowbreak Exception} (requirement không thoả hoặc xung đột), còn 500, 502, 504 thành \code{CommitState\allowbreak Unknown\allowbreak Exception} (\href{https://py.iceberg.apache.org/reference/pyiceberg/catalog/rest/}{PyIceberg: rest}). Khi trạng thái commit chưa biết, client không được xoá các file vừa ghi, vì commit có thể đã thành công.
+\end{enumerate}
+
+\textbf{Ai ghi file nào trong một lần append.} Sơ đồ dưới áp cho Spark; với PyIceberg, ``client'' là tiến trình Python làm cả việc của driver và executor.
+
+\begin{codeblock}
+tầng                    định dạng      REST catalog                catalog JDBC / Hive
+con trỏ tới metadata    bản ghi DB     catalog server đổi nguyên tử catalog đổi bằng check-and-put
+        |                              theo yêu cầu của client
+metadata.json           JSON           catalog server              Spark driver
+        |
+manifest list           Avro           Spark driver                Spark driver
+        |
+manifest                Avro           Spark driver                Spark driver
+        |
+data file, delete file  Parquet/ORC/.. Spark executor              Spark executor
+\end{codeblock}
+
+\subsection{Đọc, tiến hoá và xoá}
+\begin{enumerate}[resume]
+  \item \textbf{Time travel.} Theo đặc tả, mỗi lần \code{current-snapshot-id} thay đổi thì \code{snapshot-log} có thêm một mục; đây không phải chuỗi \code{parent-snapshot-id} (\href{https://iceberg.apache.org/spec/}{Iceberg spec}). Trong Spark: \code{VERSION AS OF <snapshot\_id>} và \code{TIMESTAMP AS OF '...'} (\href{https://iceberg.apache.org/docs/latest/spark-queries/}{Spark Queries}); trong PyIceberg: \code{table.\allowbreak scan(snapshot\_id=...)} (\href{https://py.iceberg.apache.org/api/}{PyIceberg API}).
+  \item \textbf{Schema evolution.} Cột được theo dõi bằng field ID, nên thêm, xoá, đổi tên, đổi thứ tự cột không phải ghi lại data file (\href{https://iceberg.apache.org/docs/latest/evolution/}{Evolution}). PyIceberg: \code{with table.\allowbreak update\_schema() as u:} với \code{add\_column}, \code{rename\_column}; thay đổi không tương thích cần \code{allow\_\allowbreak incompatible\_\allowbreak changes=True} (\href{https://py.iceberg.apache.org/api/}{PyIceberg API}).
+  \item \textbf{Hidden partitioning và partition evolution.} Giá trị partition được suy ra từ cột gốc bằng transform (\code{year}, \code{month}, \code{day}, \code{hour}, \code{bucket}, \code{truncate}, \code{identity}); người dùng lọc trên cột gốc và Iceberg tự dùng partition. Đổi partition spec không ghi lại dữ liệu cũ; mỗi file giữ spec mà nó được ghi (\href{https://iceberg.apache.org/docs/latest/partitioning/}{Partitioning}, \href{https://iceberg.apache.org/docs/latest/evolution/}{Evolution}).
+  \item \textbf{Copy-on-write và merge-on-read.} Ba property \code{write.\allowbreak delete.mode}, \code{write.\allowbreak update.mode}, \code{write.\allowbreak merge.mode} mặc định \code{copy-on-write}: file chứa dòng bị đổi được ghi lại toàn bộ. \code{merge-on-read} (v2 trở lên) ghi delete file và để bên đọc ghép lại, nên ghi rẻ hơn, đọc đắt hơn và cần compaction thường xuyên hơn (\href{https://iceberg.apache.org/docs/latest/configuration/}{Configuration}).
+  \item \textbf{Delete file.} Position delete được mã hoá trong position delete file (v2) hoặc deletion vector (v3 trở lên); deletion vector lưu trong file Puffin, và phải chứa mọi xoá từ các position delete file hiện có của data file đó. Equality delete xoá theo giá trị cột (\href{https://iceberg.apache.org/spec/}{Iceberg spec}, mục Delete Formats; \href{https://github.com/apache/iceberg/blob/main/format/puffin-spec.md}{Puffin spec}).
+\end{enumerate}
+
+\subsection{Vận hành}
+\begin{enumerate}[resume]
+  \item \textbf{Metadata table.} Spark đọc được \code{<bảng>.snapshots}, \code{.history}, \code{.manifests}, \code{.entries}, \code{.files}, \code{.refs}, \code{.metadata\_\allowbreak log\_entries} (\href{https://iceberg.apache.org/docs/latest/spark-queries/}{Spark Queries}). PyIceberg có \code{table.\allowbreak inspect.\allowbreak snapshots()}, \code{manifests()}, \code{entries()}, \code{files()}, \code{history()}, \code{refs()}, \code{partitions()}, \code{data\_files()}, \code{delete\_files()} (\href{https://py.iceberg.apache.org/api/}{PyIceberg API}).
+  \item \textbf{Bảo trì được khuyên.} Expire snapshot để bỏ snapshot cũ và file không còn dùng; mặc định giữ snapshot trong 5 ngày và ít nhất 1 snapshot (\code{history.\allowbreak expire.\allowbreak max-snapshot-\allowbreak age-ms}, \code{history.\allowbreak expire.\allowbreak min-snapshots-\allowbreak to-keep}). Xoá metadata cũ bằng \code{write.\allowbreak metadata.\allowbreak delete-after-\allowbreak commit.enabled} (mặc định \code{false}) và \code{write.\allowbreak metadata.\allowbreak previous-\allowbreak versions-max} (mặc định 100). Xoá file mồ côi do job hỏng để lại (\href{https://iceberg.apache.org/docs/latest/maintenance/}{Maintenance}, \href{https://iceberg.apache.org/docs/latest/configuration/}{Configuration}). Đừng chạy \code{remove\_orphan\_files} với ngưỡng tuổi ngắn hơn thời gian của job ghi dài nhất: file của một commit chưa xong trông giống file mồ côi.
+  \item \textbf{Bảo trì tuỳ chọn.} Compaction (\code{rewrite\_data\_files}) gộp file nhỏ và áp delete file; \code{rewrite\_manifests} gom lại manifest để lập kế hoạch đọc nhanh hơn. Spark gọi chúng bằng \code{CALL <catalog>.system.<thủ tục>(...)} (\href{https://iceberg.apache.org/docs/latest/spark-procedures/}{Spark Procedures}); PyIceberg có \code{table.maintenance.\allowbreak expire\_snapshots()} (\href{https://py.iceberg.apache.org/api/}{PyIceberg API}).
+  \item \textbf{Branch, tag và write-audit-publish.} Branch và tag là ref có tên trỏ tới snapshot, có thể đặt thời gian giữ riêng; nhánh \code{main} không bao giờ hết hạn (\href{https://iceberg.apache.org/docs/latest/branching/}{Branching and Tagging}, \href{https://iceberg.apache.org/spec/}{spec}). Write-audit-publish: ghi vào branch \code{audit}, kiểm tra, rồi \code{fast\_forward} \code{main} tới \code{audit} (\href{https://iceberg.apache.org/docs/latest/spark-procedures/}{Spark Procedures}).
+  \item \textbf{Delta Lake và Apache Hudi.} Delta Lake commit bằng cách thêm file JSON có số thứ tự vào thư mục \code{\_delta\_log} và định kỳ ghi checkpoint (\href{https://github.com/delta-io/delta/blob/master/PROTOCOL.md}{Delta PROTOCOL.md}). Hudi có hai loại bảng copy-on-write và merge-on-read (\href{https://hudi.apache.org/docs/table_types/}{Hudi: Table \& Query Types}). Cả hai giải cùng bài toán commit trên object storage với cấu trúc metadata khác Iceberg.
+\end{enumerate}
+
+\section{Bắt đầu}
+\begin{itemize}
+  \item \href{https://iceberg.apache.org/spark-quickstart/}{Spark and Iceberg Quickstart}: chạy Docker Compose của trang, tạo bảng, insert, đọc metadata table.
+  \item \href{https://py.iceberg.apache.org/api/}{PyIceberg: Python API}: \code{load\_catalog}, \code{create\_table}, \code{append}, \code{inspect}.
+  \item \href{https://iceberg.apache.org/docs/latest/spark-getting-started/}{Iceberg: Spark Getting Started}: cấu hình catalog cho Spark.
+\end{itemize}
+
+\section{Tài liệu chính thức}
+Đặc tả ở \code{iceberg.apache.org/spec/} không gắn phiên bản thư viện. Docs thư viện có phiên bản: \code{docs/latest/} hiện là 1.12.0; khi lab ghim phiên bản khác, đọc \code{docs/<phiên bản>/}.
+
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{1.8cm}@{}}
+\toprule
+\thd{tài liệu} & \thd{nội dung cần đọc} & \thd{thời lượng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://iceberg.apache.org/spec/}{Iceberg Table Spec} & Overview, Format Versioning, Optimistic Concurrency, Sequence Numbers, Manifests, Manifest Lists, Table Metadata, Delete Formats, Commit Conflict Resolution, phụ lục Implementation Notes & 8 giờ \\
+\href{https://iceberg.apache.org/docs/latest/reliability/}{Reliability} và \href{https://iceberg.apache.org/docs/latest/partitioning/}{Partitioning} & Hive thiếu gì; hidden partitioning & 1 giờ \\
+\href{https://iceberg.apache.org/docs/latest/evolution/}{Evolution} & schema evolution, partition evolution, sort order & 1 giờ \\
+\href{https://iceberg.apache.org/docs/latest/configuration/}{Configuration} & write properties, table behavior properties & 1 giờ \\
+\href{https://iceberg.apache.org/docs/latest/maintenance/}{Maintenance} & recommended và optional maintenance & 1 giờ \\
+\href{https://iceberg.apache.org/docs/latest/branching/}{Branching and Tagging} & ref, retention, WAP & 1 giờ \\
+\href{https://iceberg.apache.org/docs/latest/spark-procedures/}{Spark Procedures} & \code{expire\_snapshots}, \code{rewrite\_data\_files}, \code{rewrite\_manifests}, \code{remove\_orphan\_files}, \code{rollback\_to\_snapshot}, \code{fast\_forward} & 1,5 giờ \\
+\href{https://iceberg.apache.org/docs/latest/spark-queries/}{Spark Queries} & time travel, metadata table & 1 giờ \\
+\href{https://iceberg.apache.org/rest-catalog-spec/}{REST Catalog Spec} và \href{https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml}{OpenAPI} & \code{updateTable}, \code{CommitTableRequest}, \code{TableRequirement}, \code{TableUpdate}, mã lỗi & 2 giờ \\
+\href{https://py.iceberg.apache.org/api/}{PyIceberg API} & create, append, overwrite, delete, upsert, inspect, update\_schema, maintenance & 1,5 giờ \\
+\href{https://github.com/delta-io/delta/blob/master/PROTOCOL.md}{Delta PROTOCOL.md} và \href{https://hudi.apache.org/docs/table_types/}{Hudi Table Types} & để so sánh: Delta log, checkpoint; COW và MOR của Hudi & 2 giờ \\
+\end{xltabular}
+
+\section{Khoá học miễn phí}
+\begin{itemize}
+  \item \href{https://15445.courses.cs.cmu.edu/fall2025/schedule.html}{CMU 15-445/645 Fall 2025}: miễn phí slide và video; bài \#17 Concurrency Control Theory và \#20 Multi-Version Concurrency Control giúp hiểu serializable isolation và snapshot isolation trước khi đọc mục Optimistic Concurrency của đặc tả.
+\end{itemize}
+
+\section{Lab thực hành}
+Chuẩn bị: stack tham chiếu với RustFS, một REST catalog (\code{apache/iceberg-rest-fixture} để học, hoặc Polaris), Spark có Iceberg runtime và PyIceberg. Cấu hình Spark tối thiểu (thay host, cổng, bucket theo compose của bạn):
+\begin{codeblock}
+spark.sql.extensions            org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+spark.sql.catalog.lab           org.apache.iceberg.spark.SparkCatalog
+spark.sql.catalog.lab.type      rest
+spark.sql.catalog.lab.uri       http://rest:8181
+spark.sql.catalog.lab.warehouse s3://warehouse/
+spark.sql.catalog.lab.io-impl   org.apache.iceberg.aws.s3.S3FileIO
+spark.sql.catalog.lab.s3.endpoint          http://rustfs:9000
+spark.sql.catalog.lab.s3.path-style-access true
+\end{codeblock}
+
+\subsection{Lab 5.1: Ghi Olist orders bằng PyIceberg và đọc cây metadata}
+\begin{enumerate}
+  \item Nạp orders với kiểu timestamp rõ ràng và ghi thành hai snapshot:
+\begin{codeblock}
+import pyarrow as pa, pyarrow.csv as pv, pyarrow.compute as pc
+from pyiceberg.catalog import load_catalog
+
+ts = ["order_purchase_timestamp", "order_approved_at",
+      "order_delivered_carrier_date", "order_delivered_customer_date",
+      "order_estimated_delivery_date"]
+opts = pv.ConvertOptions(column_types={c: pa.timestamp("us") for c in ts})
+orders = pv.read_csv("olist/olist_orders_dataset.csv", convert_options=opts)
+
+cat = load_catalog("lab", **{
+    "type": "rest", "uri": "http://localhost:8181", "warehouse": "s3://warehouse/",
+    "s3.endpoint": "http://localhost:9000",
+    "s3.access-key-id": "...", "s3.secret-access-key": "..."})
+cat.create_namespace("olist")
+tbl = cat.create_table("olist.orders", schema=orders.schema)
+
+year = pc.year(orders["order_purchase_timestamp"])
+tbl.append(orders.filter(pc.less(year, 2018)))
+tbl.append(orders.filter(pc.greater_equal(year, 2018)))
+print(tbl.metadata_location)
+print(tbl.inspect.snapshots().to_pandas()[["snapshot_id", "parent_id", "operation", "manifest_list"]])
+\end{codeblock}
+  \item Tải file metadata hiện tại về và đọc bằng \code{jq}:
+\begin{codeblock}
+aws --endpoint-url http://localhost:9000 s3 cp <metadata_location> - \
+  | jq '."current-snapshot-id", (.snapshots[] | ."manifest-list"), ."snapshot-log"'
+\end{codeblock}
+  \item Liệt kê toàn bộ object của bảng trên RustFS (\code{s3 ls --recursive}). Gán mỗi object vào một tầng của cây: \code{metadata.json}, manifest list, manifest, data file.
+  \item Dùng \code{tbl.inspect.manifests()} và \code{tbl.inspect.entries()} để xem manifest nào thuộc snapshot nào và các bound của cột \code{order\_id} (chuỗi 32 ký tự bị cắt còn 16).
+\end{enumerate}
+\hoanthanh{bạn vẽ được cây của bảng sau hai lần append, với đúng tên file thật ở mỗi tầng, và chỉ ra file nào do catalog server ghi, file nào do PyIceberg ghi.}
+
+\subsection{Lab 5.2: Hidden partitioning, time travel, schema evolution (Spark)}
+\begin{enumerate}
+  \item Tạo bảng chia partition theo tháng và nạp từ bảng ở Lab 5.1:
+\begin{codeblock}
+CREATE TABLE lab.olist.orders_p (
+  order_id string, customer_id string, order_status string,
+  order_purchase_timestamp timestamp, order_delivered_customer_date timestamp)
+USING iceberg PARTITIONED BY (months(order_purchase_timestamp));
+
+INSERT INTO lab.olist.orders_p
+SELECT order_id, customer_id, order_status, order_purchase_timestamp,
+       order_delivered_customer_date FROM lab.olist.orders;
+
+SELECT partition, record_count, file_path FROM lab.olist.orders_p.files;
+\end{codeblock}
+  \item Chạy truy vấn lọc trên cột gốc \code{order\_purchase\_timestamp} cho tháng 11/2017 và xem số file được quét trong Spark UI (hoặc plan). Không có cột partition nào xuất hiện trong câu lệnh.
+  \item Ghi lại \code{snapshot\_id} hiện tại từ \code{.snapshots}. Đổi schema và partition spec:
+\begin{codeblock}
+ALTER TABLE lab.olist.orders_p ADD COLUMN delivery_days int;
+ALTER TABLE lab.olist.orders_p RENAME COLUMN order_status TO status;
+ALTER TABLE lab.olist.orders_p
+  REPLACE PARTITION FIELD order_purchase_timestamp_month WITH days(order_purchase_timestamp);
+INSERT INTO lab.olist.orders_p SELECT ... ;   -- một ít dòng mới
+SELECT spec_id, partition, file_path FROM lab.olist.orders_p.files;
+SELECT count(*) FROM lab.olist.orders_p VERSION AS OF <snapshot_id cũ>;
+\end{codeblock}
+\end{enumerate}
+\hoanthanh{bạn cho thấy file cũ và file mới có \code{spec\_id} khác nhau trong cùng một bảng, truy vấn time travel trả đúng số dòng cũ, và không data file cũ nào bị ghi lại khi đổi tên cột (so danh sách \code{file\_path} trước và sau).}
+
+\subsection{Lab 5.3: Copy-on-write so với merge-on-read}
+\begin{enumerate}
+  \item Tạo hai bản sao:
+\begin{codeblock}
+CREATE TABLE lab.olist.orders_cow USING iceberg
+  TBLPROPERTIES ('format-version'='2') AS SELECT * FROM lab.olist.orders;
+CREATE TABLE lab.olist.orders_mor USING iceberg
+  TBLPROPERTIES ('format-version'='2', 'write.delete.mode'='merge-on-read')
+  AS SELECT * FROM lab.olist.orders;
+DELETE FROM lab.olist.orders_cow WHERE order_status = 'canceled';
+DELETE FROM lab.olist.orders_mor WHERE order_status = 'canceled';
+\end{codeblock}
+  \item So \code{SELECT operation, summary FROM <bảng>.snapshots} của hai bảng (số file thêm, file bỏ, delete file). Xem \code{SELECT content, file\_format, record\_count, file\_path FROM lab.olist.orders\_mor.files}: \code{content} bằng 0 là data file, 1 là position delete, 2 là equality delete.
+  \item Tuỳ chọn, nếu phiên bản Spark và Iceberg của bạn hỗ trợ v3: lặp lại với \code{'format-version'=\allowbreak '3'} và tìm delete file định dạng Puffin (deletion vector).
+  \item Chạy \code{CALL lab.system.rewrite\_data\_files(table => 'olist.orders\_mor')} và xem delete file còn được tham chiếu trong snapshot mới không.
+\end{enumerate}
+\hoanthanh{bạn có bảng so sánh hai chế độ (số byte ghi khi DELETE, số file mà lần đọc sau phải mở) và giải thích được vì sao merge-on-read cần compaction.}
+
+\subsection{Lab 5.4: Bảo trì và write-audit-publish}
+\begin{enumerate}
+  \item Tạo bảng nhiều file nhỏ: bằng PyIceberg, append 30 lần, mỗi lần 1.000 dòng orders vào \code{olist.orders\_small}. Đếm \code{SELECT count(*) FROM lab.olist.orders\_small.files} và \code{.snapshots}.
+  \item Chạy lần lượt và ghi lại số file, số manifest, số snapshot sau mỗi bước:
+\begin{codeblock}
+CALL lab.system.rewrite_data_files(table => 'olist.orders_small');
+CALL lab.system.rewrite_manifests('olist.orders_small');
+CALL lab.system.expire_snapshots(table => 'olist.orders_small',
+     older_than => TIMESTAMP '<thời điểm hiện tại>', retain_last => 1);
+CALL lab.system.remove_orphan_files(table => 'olist.orders_small', dry_run => true);
+\end{codeblock}
+  \item Write-audit-publish trên \code{orders\_p}:
+\begin{codeblock}
+ALTER TABLE lab.olist.orders_p CREATE TAG before_wap;
+ALTER TABLE lab.olist.orders_p CREATE BRANCH audit;
+INSERT INTO lab.olist.orders_p.branch_audit SELECT ... ;   -- dữ liệu mới
+SELECT count(*) FROM lab.olist.orders_p.branch_audit WHERE order_id IS NULL;
+SELECT count(*) FROM lab.olist.orders_p;                    -- main chưa đổi
+CALL lab.system.fast_forward('olist.orders_p', 'main', 'audit');
+\end{codeblock}
+\end{enumerate}
+\hoanthanh{bạn chứng minh bằng metadata table rằng compaction giảm số file mà không đổi số dòng, expire làm mất khả năng time travel về snapshot cũ, và \code{main} chỉ thấy dữ liệu mới sau \code{fast\_forward}.}
+
+\section{Kế hoạch theo tuần}
+\begin{xltabular}{\textwidth}{@{}P{1.4cm} L P{1.4cm}@{}}
+\toprule
+\thd{tuần} & \thd{việc} & \thd{giờ} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & Reliability, Partitioning; spec: Overview, Manifests, Manifest Lists, Table Metadata; Spark Quickstart; Lab 5.1 & 10 \\
+2 & spec: Optimistic Concurrency, Sequence Numbers, Commit Conflict Resolution; REST Catalog Spec \code{updateTable}; CMU bài \#17, \#20; Lab 5.2 & 10 \\
+3 & Configuration, Evolution, spec Delete Formats; Maintenance, Spark Procedures, Branching; Lab 5.3, 5.4 & 10 \\
+4 (nửa tuần) & Delta PROTOCOL.md, Hudi Table Types; thử thách kỹ năng; câu hỏi tự kiểm tra & 5 \\
+thêm & spec Format Versioning chi tiết v3; Puffin spec; PyIceberg \code{upsert} và \code{overwrite} với filter & 6 \\
+\end{xltabular}
+
+\begin{thuthach}
+Bảng \code{olist.orders} cần cập nhật trạng thái đơn hằng ngày. Hãy giả lập ba ngày thay đổi (đổi \code{order\_status}, thêm đơn mới), rồi xây quy trình: ghi thay đổi vào một branch, kiểm tra chất lượng, publish lên \code{main}, và chạy bảo trì để bảng không tích file nhỏ hay snapshot thừa. Thêm một tình huống hai writer cùng sửa các dòng chồng nhau và quan sát bên nào thất bại. Không có hướng dẫn từng bước; chọn Spark hoặc PyIceberg (\code{upsert} theo identifier field) tuỳ bạn.
+\hoanthanh{bạn nộp được một bảng lấy từ metadata table cho mỗi ngày (snapshot, operation, số data file, số delete file), một lần commit thất bại kèm thông báo lỗi và giải thích theo mục Optimistic Concurrency của đặc tả, và trạng thái cuối có số file không vượt ngưỡng bạn tự đặt.}
+\end{thuthach}
+
+\section{Câu hỏi tự kiểm tra}
+\begin{enumerate}
+  \item Vẽ cây metadata từ con trỏ trong catalog tới data file; file nào là JSON, file nào là Avro?
+  \item Trong một lần append bằng Spark qua REST catalog, liệt kê theo thứ tự các file được ghi, ai ghi, và thao tác nào làm commit hiện ra với người đọc.
+  \item Vì sao retry chỉ cần ghi lại manifest list mà dùng lại được manifest?
+  \item Hai writer cùng append: ai thắng, bên thua làm gì? Hai writer xoá các dòng chồng nhau thì sao?
+  \item REST catalog trả 409 và trả 504 khác nhau thế nào, và client phải làm gì với các file đã ghi trong mỗi trường hợp?
+  \item \code{snapshot-log} khác chuỗi cha của snapshot ở đâu?
+  \item Hidden partitioning sửa được lỗi gì của cột ngày kiểu Hive mà người dùng phải tự lọc?
+  \item Vì sao đổi tên cột không cần ghi lại dữ liệu?
+  \item Khi nào chọn merge-on-read, và khi đó cần thêm việc bảo trì nào?
+  \item Deletion vector của v3 khác position delete file của v2 ở đâu?
+  \item Chuyện gì có thể xảy ra nếu \code{remove\_orphan\_files} chạy với ngưỡng tuổi rất ngắn trong lúc một job đang ghi?
+  \item Kể bốn bước write-audit-publish bằng branch, và so cách commit của Delta Lake với Iceberg.
+\end{enumerate}
+
+\section{Điểm dễ nhầm}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{3.2cm}@{}}
+\toprule
+\thd{điểm dễ nhầm} & \thd{thực tế} & \thd{docs chính thức} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Nhiều người nghĩ Iceberg là định dạng file như Parquet & Iceberg là table format quản lý data file Parquet, Avro hoặc ORC & \href{https://iceberg.apache.org/spec/}{Iceberg spec} \\
+``Iceberg cần rename nguyên tử'' & Chỉ bảng kiểu file system dùng rename; đặc tả ghi cách này không an toàn trên object store & \href{https://iceberg.apache.org/spec/}{Iceberg spec} \\
+``Catalog lưu metadata của bảng'' & Catalog giữ con trỏ tới \code{metadata.json} hiện tại; metadata và data nằm trên storage & \href{https://iceberg.apache.org/spec/}{Iceberg spec} \\
+``Với REST catalog, Spark ghi \code{metadata.json}'' & Client gửi \code{requirements} và \code{updates}; server áp update, ghi metadata mới và đổi con trỏ & \href{https://iceberg.apache.org/rest-catalog-spec/}{REST Catalog Spec} \\
+``REST trả 5xx nghĩa là commit hỏng, dọn file đi'' & 500, 502, 504 là trạng thái chưa biết; chỉ 409 là commit thất bại & \href{https://py.iceberg.apache.org/reference/pyiceberg/catalog/rest/}{PyIceberg rest} \\
+``Iceberg mặc định snapshot isolation'' & Delete, update, merge mặc định \code{serializable} & \href{https://iceberg.apache.org/docs/latest/configuration/}{Configuration} \\
+``Merge-on-read là mặc định và luôn nhanh hơn'' & Mặc định là copy-on-write; MOR đổi chi phí ghi lấy chi phí đọc & \href{https://iceberg.apache.org/docs/latest/configuration/}{Configuration} \\
+``Hidden partitioning nghĩa là bảng không chia partition'' & Partition được suy ra bằng transform từ cột gốc & \href{https://iceberg.apache.org/docs/latest/partitioning/}{Partitioning} \\
+``Time travel giữ mãi'' & Expire snapshot là bảo trì được khuyên; mặc định giữ 5 ngày và ít nhất 1 snapshot & \href{https://iceberg.apache.org/docs/latest/maintenance/}{Maintenance}, \href{https://iceberg.apache.org/docs/latest/configuration/}{Configuration} \\
+``Min/max trong manifest bằng min/max trong footer Parquet'' & Manifest giữ bound theo metrics mode, mặc định \code{truncate(16)} & \href{https://iceberg.apache.org/docs/latest/configuration/}{Configuration} \\
+``Mọi engine đã làm đủ v3, v4'' & v4 chưa được thông qua; engine có thể chưa làm đủ v3 & \href{https://iceberg.apache.org/spec/}{Iceberg spec} \\
+\end{xltabular}

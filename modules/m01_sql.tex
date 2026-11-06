@@ -1,0 +1,234 @@
+\modulechapter{1}{SQL và mô hình quan hệ}
+\moduleinfo{Cơ bản}{35 giờ}{không}
+
+Mọi tầng của một lakehouse, từ staging tới mart, đều được viết và kiểm bằng SQL. Module này dạy bạn đọc, viết và giải thích câu SQL nhiều bảng, thiết kế bảng có khoá và ràng buộc đúng, và hiểu engine chạy câu lệnh ra sao. Bạn học hành vi OLTP trên PostgreSQL 18, rồi SQL phân tích trên DuckDB. Học xong, bạn viết được truy vấn có \code{JOIN}, \code{GROUP BY}, CTE và window function trên dữ liệu Olist, và biết ràng buộc nào engine thực sự kiểm, kể cả trong lakehouse.
+
+\section{Bạn sẽ học được}
+
+\begin{itemize}
+  \item Viết câu SQL nhiều bảng có \code{JOIN}, \code{GROUP BY}, \code{HAVING}, CTE và window function, rồi giải thích từng dòng kết quả.
+  \item Phân loại câu lệnh thành DDL, DML, DCL, TCL và nhận ra cách phân loại khác nhau giữa các hệ quản trị.
+  \item Thiết kế bảng với \code{PRIMARY KEY}, \code{FOREIGN KEY}, \code{UNIQUE}, \code{NOT NULL}, \code{CHECK}; chọn khoá tự nhiên hay khoá thay thế.
+  \item Xác định grain và khoá logic của một bảng, rồi kiểm nó bằng truy vấn.
+  \item Giải thích NULL và logic ba trị, frame mặc định của window function, và các mức isolation của PostgreSQL.
+  \item Đọc kế hoạch truy vấn bằng \code{EXPLAIN} và \code{EXPLAIN ANALYZE}.
+  \item Phân biệt OLTP với OLAP, và giải thích vì sao lakehouse giữ khoá bằng pipeline chứ không bằng ràng buộc.
+\end{itemize}
+
+\section{Nội dung chính}
+
+\subsection{Truy vấn}
+
+\begin{enumerate}
+  \item \textbf{Mô hình quan hệ.} Dữ liệu nằm trong bảng (relation); mỗi dòng (row, tuple) có cùng tập cột (column, attribute); tập bảng gom trong một database và schema. Đọc \href{https://www.postgresql.org/docs/current/tutorial-concepts.html}{PostgreSQL 18: Concepts}.
+  \item \textbf{Nhóm câu lệnh.} DDL (Data Definition Language) tạo và đổi cấu trúc: \code{CREATE}, \code{ALTER}, \code{DROP}. DML (Data Manipulation Language) đọc và đổi dữ liệu: \code{SELECT}, \code{INSERT}, \code{UPDATE}, \code{DELETE}, \code{MERGE}. DCL (Data Control Language) cấp quyền: \code{GRANT}, \code{REVOKE}. TCL (Transaction Control Language) điều khiển transaction: \code{BEGIN}, \code{COMMIT}, \code{ROLLBACK}, \code{SAVEPOINT}. Cách chia không thống nhất giữa các hệ quản trị: tài liệu YugabyteDB YSQL (tương thích PostgreSQL) chia DDL, DML, DCL, TCL (\href{https://docs.yugabyte.com/preview/api/ysql/the-sql-language/}{YSQL: The SQL language}), còn Oracle xếp \code{GRANT}, \code{REVOKE} vào DDL, có nhóm Transaction Control riêng, và tự commit transaction trước và sau mỗi câu DDL (\href{https://docs.oracle.com/en/database/oracle/oracle-database/23/sqlrf/Types-of-SQL-Statements.html}{Oracle 23: Types of SQL Statements}). Danh sách đầy đủ câu lệnh của PostgreSQL nằm ở \href{https://www.postgresql.org/docs/current/sql-commands.html}{PostgreSQL 18: SQL Commands}.
+  \item \textbf{\code{SELECT} và thứ tự xử lý.} Về logic, PostgreSQL tính \code{WITH}, rồi \code{FROM}, \code{WHERE}, \code{GROUP BY} và \code{HAVING}, rồi danh sách \code{SELECT}, \code{DISTINCT}, phép tập hợp, \code{ORDER BY}, cuối cùng \code{LIMIT}. Vì vậy alias đặt trong \code{SELECT} không dùng được trong \code{WHERE}. Đọc mục Description của \href{https://www.postgresql.org/docs/current/sql-select.html}{PostgreSQL 18: SELECT}.
+  \item \textbf{NULL và logic ba trị.} So sánh thường với NULL cho ra NULL, nên \code{WHERE col = NULL} không trả dòng nào. Dùng \code{IS NULL}; khi cần coi hai NULL là bằng nhau, dùng \code{IS NOT DISTINCT FROM} (\href{https://www.postgresql.org/docs/current/functions-comparison.html}{PostgreSQL 18, mục 9.2}). Spark SQL có toán tử tương đương \code{<=>}.
+  \item \textbf{\code{JOIN} các loại.} \code{INNER}, \code{LEFT}, \code{RIGHT}, \code{FULL}, \code{CROSS}. Semi join viết bằng \code{EXISTS}, anti join bằng \code{NOT EXISTS}. Cẩn thận \code{NOT IN} với subquery có NULL: kết quả có thể là NULL thay vì true (\href{https://www.postgresql.org/docs/current/functions-subquery.html}{PostgreSQL 18, mục 9.24}).
+  \item \textbf{\code{GROUP BY}, \code{HAVING}, \code{FILTER}.} \code{WHERE} lọc dòng trước khi gộp; \code{HAVING} lọc nhóm sau khi gộp. Mệnh đề \code{FILTER (WHERE ...)} cho một aggregate chỉ nhận một phần dòng (\href{https://www.postgresql.org/docs/current/sql-expressions.html}{PostgreSQL 18, mục 4.2.7}).
+  \item \textbf{Subquery và CTE.} \code{WITH} đặt tên cho truy vấn con; \code{WITH RECURSIVE} cho truy vấn tự tham chiếu. PostgreSQL gộp một CTE không đệ quy, không có side effect, được tham chiếu một lần vào câu cha; \code{MATERIALIZED} và \code{NOT MATERIALIZED} ghi đè quyết định đó (\href{https://www.postgresql.org/docs/current/queries-with.html}{PostgreSQL 18, mục 7.8}).
+  \item \textbf{Window function.} \code{row\_\allowbreak{}number()}, \code{rank()}, \code{dense\_\allowbreak{}rank()}, \code{lag()}, \code{lead()}, aggregate chạy trên cửa sổ. Frame có ba chế độ \code{ROWS}, \code{RANGE}, \code{GROUPS} và mệnh đề \code{EXCLUDE}. Frame mặc định là \code{RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW}: khi có \code{ORDER BY}, frame chạy từ đầu partition tới dòng ngang hàng (peer) cuối cùng của dòng hiện tại; không có \code{ORDER BY} thì mọi dòng là peer nên frame phủ cả partition (\href{https://www.postgresql.org/docs/current/sql-expressions.html}{PostgreSQL 18, mục 4.2.8}; \href{https://www.postgresql.org/docs/current/tutorial-window.html}{tutorial 3.5}). DuckDB có thêm \code{QUALIFY} để lọc theo kết quả window function, giống \code{HAVING} lọc theo aggregate (\href{https://duckdb.org/docs/2.0/sql/query_syntax/qualify}{DuckDB 2.0: QUALIFY}; \href{https://duckdb.org/docs/2.0/sql/functions/window_functions}{DuckDB 2.0: Window Functions}).
+\end{enumerate}
+
+\subsection{Thiết kế bảng}
+
+\begin{enumerate}[resume]
+  \item \textbf{Khoá và ràng buộc.} \code{CHECK} nhận dòng khi biểu thức là true hoặc NULL. \code{NOT NULL} tương đương \code{CHECK (col IS NOT NULL)} nhưng hiệu quả hơn. \code{PRIMARY KEY} đòi giá trị vừa duy nhất vừa khác NULL, và tự tạo một unique B-tree index. Với \code{UNIQUE}, mặc định hai NULL không bằng nhau, nên nhiều dòng có NULL vẫn lọt qua; thêm \code{NULLS NOT DISTINCT} để đổi điều đó. \code{FOREIGN KEY} có các hành động \code{NO ACTION} (mặc định), \code{RESTRICT}, \code{CASCADE}, \code{SET NULL}, \code{SET DEFAULT}, và không tự tạo index trên cột tham chiếu (\href{https://www.postgresql.org/docs/current/ddl-constraints.html}{PostgreSQL 18, mục 5.5}).
+  \item \textbf{Khoá tự nhiên và khoá thay thế.} Khoá tự nhiên (natural key) có nghĩa nghiệp vụ và đến từ hệ thống nguồn, ví dụ \code{seller\_\allowbreak{}id} của Olist. Khoá thay thế (surrogate key) là định danh bạn thêm vào, theo định nghĩa không có trong dữ liệu nguồn (\href{https://learn.microsoft.com/en-us/power-bi/guidance/star-schema}{Microsoft Learn: star schema}). Nếu bảng chỉ có khoá thay thế mà khoá tự nhiên không có \code{UNIQUE}, không gì ngăn hai dòng mô tả cùng một thực thể; vì vậy thường giữ cả hai.
+  \item \textbf{Grain và khoá logic.} Grain là câu trả lời cho “một dòng của bảng này là gì”, ví dụ “một dòng là một lần thanh toán của một đơn”. Trong cách nói thường ngày của data engineering, khoá logic là tập cột làm mỗi dòng duy nhất ở grain đó, dù engine có kiểm hay không. Với bảng payments của Olist, giả thuyết khoá logic là (\code{order\_\allowbreak{}id}, \code{payment\_\allowbreak{}sequential}); bạn kiểm giả thuyết đó bằng truy vấn trong Lab 1.2. Thuật ngữ này không có định nghĩa chuẩn trong docs của PostgreSQL; hãy hiểu nó như một quy ước làm việc.
+  \item \textbf{Chuẩn hoá.} Mục tiêu là bỏ dư thừa và phụ thuộc không nhất quán. 1NF: bỏ nhóm lặp, mỗi tập dữ liệu liên quan một bảng có khoá chính. 2NF: giá trị dùng cho nhiều dòng tách thành bảng riêng, nối bằng khoá ngoại. 3NF: bỏ cột không phụ thuộc vào khoá. Trang của Microsoft coi 3NF là mức cao nhất cần cho đa số ứng dụng, và nhắc rằng nhiều bảng nhỏ có thể làm chậm hệ thống (\href{https://learn.microsoft.com/en-us/troubleshoot/office/access/database-normalization-description}{Microsoft Learn: Database normalization description}). Các dạng chuẩn cao hơn (BCNF, 4NF, 5NF) có trong bài giảng CMU 15-445 ở mục Khoá học miễn phí.
+  \item \textbf{OLTP và OLAP.} OLTP phục vụ giao dịch thời gian thực; OLAP thường chạy theo lô, cho truy vấn, báo cáo, phân tích trên dữ liệu lịch sử; tách xử lý phân tích khỏi OLTP để không ảnh hưởng tải giao dịch (\href{https://docs.aws.amazon.com/whitepapers/latest/data-warehousing-on-aws/data-processing.html}{AWS: Data processing}). Hệ OLTP như PostgreSQL lưu theo dòng; dữ liệu phân tích thường lưu theo cột, ví dụ Apache Parquet là định dạng file hướng cột (\href{https://parquet.apache.org/docs/overview/}{Parquet: Overview}).
+\end{enumerate}
+
+\subsection{Engine chạy câu lệnh thế nào}
+
+\begin{enumerate}[resume]
+  \item \textbf{Transaction và isolation.} PostgreSQL nhận cả bốn mức isolation chuẩn nhưng chỉ cài ba mức khác nhau: Read Uncommitted chạy như Read Committed. Read Committed là mặc định và cho phép nonrepeatable read; Repeatable Read chặn nonrepeatable read, và trong PostgreSQL chặn cả phantom read; chỉ Serializable chặn serialization anomaly (\href{https://www.postgresql.org/docs/current/transaction-iso.html}{PostgreSQL 18, mục 13.2}).
+  \item \textbf{Index và \code{EXPLAIN}.} Index tăng tốc đọc nhưng thêm chi phí cho cả hệ thống, nên dùng có chọn lọc (\href{https://www.postgresql.org/docs/current/indexes.html}{PostgreSQL 18, chương 11}). \code{EXPLAIN} in kế hoạch với số dòng ước lượng; \code{EXPLAIN ANALYZE} chạy thật câu lệnh rồi in thêm số dòng và thời gian thật. Ở bản 18, \code{ANALYZE} tự bật \code{BUFFERS}. Với câu sửa dữ liệu, bọc trong \code{BEGIN} … \code{ROLLBACK} (\href{https://www.postgresql.org/docs/current/using-explain.html}{PostgreSQL 18, mục 14.1}).
+\end{enumerate}
+
+\subsection{Khoá trong lakehouse}
+
+\begin{enumerate}[resume]
+  \item \textbf{Ràng buộc chỉ để thông tin.} Trên Databricks, \code{PRIMARY KEY}, \code{FOREIGN KEY} và \code{UNIQUE} là ràng buộc informational, không được kiểm; \code{NOT NULL} và \code{CHECK} được kiểm, và câu ghi vi phạm sẽ thất bại. Unique constraint đang ở Public Preview từ Databricks Runtime 18.2 (\href{https://docs.databricks.com/aws/en/tables/constraints}{Databricks: Constraints}).
+  \item \textbf{Identifier field của Iceberg.} Schema Iceberg có thể khai báo \code{identifier-\allowbreak{}field-\allowbreak{}ids}: tập cột nguyên thuỷ xác định một dòng. Engine dùng chúng làm khoá cho upsert và equality delete, nhưng Iceberg không bảo đảm hay đòi hỏi tính duy nhất; engine hoặc bên ghi dữ liệu phải tự giữ (\href{https://iceberg.apache.org/spec/\#identifier-field-ids}{Iceberg spec: Identifier Field IDs}). Trong Spark, bạn khai báo bằng \code{ALTER TABLE ... SET IDENTIFIER FIELDS} (\href{https://iceberg.apache.org/docs/latest/spark-ddl/\#alter-table-set-identifier-fields}{Iceberg: Spark DDL}). Spec hiện đã có phần cho format v4, trong đó không còn cho ghi equality delete mới; trước khi dùng v4, kiểm engine của bạn đã hỗ trợ chưa.
+  \item \textbf{Hệ quả.} Trong lakehouse, khoá duy nhất là việc của pipeline: khử trùng theo khoá logic trước khi ghi (thường bằng \code{row\_\allowbreak{}number()} rồi lọc dòng số 1), ghi bằng \code{MERGE} theo khoá logic, và chạy test đếm trùng sau mỗi lần nạp.
+\end{enumerate}
+
+\section{Bắt đầu}
+
+\begin{itemize}
+  \item \href{https://www.postgresql.org/docs/current/tutorial.html}{PostgreSQL 18: Tutorial}, chương 2 “The SQL Language”: tạo bảng, nạp dữ liệu, truy vấn, join, aggregate.
+  \item \href{https://duckdb.org/docs/2.0/sql/introduction}{DuckDB 2.0: SQL Introduction}: chạy SQL đầu tiên trên DuckDB.
+  \item \href{https://sqlbolt.com/}{SQLBolt}, bài 1 tới 12: luyện \code{SELECT}, \code{WHERE}, \code{JOIN} ngay trên trình duyệt.
+\end{itemize}
+
+\section{Tài liệu chính thức}
+
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{1.8cm}@{}}
+\toprule
+\thd{tài liệu} & \thd{nội dung cần đọc} & \thd{thời lượng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://www.postgresql.org/docs/current/tutorial.html}{PostgreSQL 18: Tutorial} & chương 2; mục 3.4 Transactions, 3.5 Window Functions & 4 giờ \\
+\href{https://www.postgresql.org/docs/current/sql-select.html}{PostgreSQL 18: SELECT} & mục Description: thứ tự xử lý; mệnh đề \code{WINDOW}, \code{DISTINCT ON} & 1 giờ \\
+\href{https://www.postgresql.org/docs/current/functions-comparison.html}{PostgreSQL 18: 9.2 Comparison} & \code{IS NULL}, \code{IS [NOT] DISTINCT FROM} & 0,5 giờ \\
+\href{https://www.postgresql.org/docs/current/functions-subquery.html}{PostgreSQL 18: 9.24 Subquery Expressions} & \code{EXISTS}, \code{IN}, \code{NOT IN} và NULL & 0,5 giờ \\
+\href{https://www.postgresql.org/docs/current/queries-with.html}{PostgreSQL 18: 7.8 WITH Queries} & CTE, \code{WITH RECURSIVE}, \code{MATERIALIZED}, CTE sửa dữ liệu & 1,5 giờ \\
+\href{https://www.postgresql.org/docs/current/sql-expressions.html}{PostgreSQL 18: 4.2 Value Expressions} & 4.2.7 Aggregate Expressions (\code{FILTER}); 4.2.8 Window Function Calls (frame) & 1,5 giờ \\
+\href{https://www.postgresql.org/docs/current/functions-window.html}{PostgreSQL 18: 9.22 Window Functions} & danh sách hàm, ghi chú về \code{last\_\allowbreak{}value} và frame & 0,5 giờ \\
+\href{https://www.postgresql.org/docs/current/ddl-constraints.html}{PostgreSQL 18: 5.5 Constraints} & 5.5.1 tới 5.5.5, gồm \code{NULLS NOT DISTINCT} & 1,5 giờ \\
+\href{https://www.postgresql.org/docs/current/transaction-iso.html}{PostgreSQL 18: 13.2 Transaction Isolation} & bảng 13.1; Read Committed và Repeatable Read & 1,5 giờ \\
+\href{https://www.postgresql.org/docs/current/indexes.html}{PostgreSQL 18: chương 11 Indexes} & 11.1 tới 11.3, 11.6 Unique Indexes & 1 giờ \\
+\href{https://www.postgresql.org/docs/current/using-explain.html}{PostgreSQL 18: 14.1 Using EXPLAIN} & 14.1.1 Basics, 14.1.2 \code{EXPLAIN ANALYZE} & 1,5 giờ \\
+\href{https://duckdb.org/docs/2.0/sql/functions/window_functions}{DuckDB 2.0: Window Functions} & framing, \code{GROUPS}, \code{EXCLUDE} & 1 giờ \\
+\href{https://duckdb.org/docs/2.0/sql/query_syntax/qualify}{DuckDB 2.0: QUALIFY} & lọc top N mỗi nhóm không cần subquery & 0,3 giờ \\
+\href{https://docs.oracle.com/en/database/oracle/oracle-database/23/sqlrf/Types-of-SQL-Statements.html}{Oracle 23: Types of SQL Statements} & cách một hệ quản trị chia nhóm câu lệnh & 0,3 giờ \\
+\href{https://learn.microsoft.com/en-us/troubleshoot/office/access/database-normalization-description}{Microsoft Learn: Database normalization} & 1NF, 2NF, 3NF và ví dụ & 0,5 giờ \\
+\href{https://docs.aws.amazon.com/whitepapers/latest/data-warehousing-on-aws/data-processing.html}{AWS: Data processing} & OLTP và OLAP & 0,3 giờ \\
+\href{https://docs.databricks.com/aws/en/tables/constraints}{Databricks: Constraints} & ràng buộc được kiểm và ràng buộc informational & 0,3 giờ \\
+\href{https://iceberg.apache.org/spec/\#identifier-field-ids}{Iceberg spec: Identifier Field IDs} & identifier field và tính duy nhất & 0,3 giờ \\
+\end{xltabular}
+
+\section{Khoá học miễn phí}
+
+\begin{itemize}
+  \item \href{https://15445.courses.cs.cmu.edu/fall2025/}{CMU 15-445/645 Database Systems, Fall 2025}: trang khoá học có lịch, slide, ghi chú và link playlist YouTube của bài giảng. Nên xem bài \#01 Relational Model \& Algebra, \#02 Modern SQL, \#06 Storage Models \& Compression, \#08 Indexes \& Filters I, \#17 Concurrency Control Theory. Bản mới nhất là \href{https://15445.courses.cs.cmu.edu/fall2026/}{Fall 2026}; lịch hai kỳ đánh số bài khác nhau, đừng trộn. Danh sách mọi kỳ ở \href{https://db.cs.cmu.edu/courses/}{CMU Database Group: Courses}.
+  \item \href{https://sqlbolt.com/}{SQLBolt}: bài tập SQL tương tác, miễn phí.
+  \item \href{https://pgexercises.com/}{PostgreSQL Exercises}: bài tập trên PostgreSQL theo nhóm Basic, Joins and Subqueries, Aggregates, Recursive; miễn phí.
+\end{itemize}
+
+\section{Lab thực hành}
+
+Mọi lab dùng bộ \href{https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce}{Brazilian E-Commerce Public Dataset by Olist}. Tải về, giải nén vào thư mục \code{olist/}. Ghim phiên bản: PostgreSQL 18, DuckDB 2.0.0.
+
+\subsection{Lab 1.1: Bảng có khoá và ràng buộc trên PostgreSQL 18}
+
+\begin{enumerate}
+  \item Chạy PostgreSQL và mở \code{psql}:
+\begin{codeblock}
+docker run -d --name pg18 -e POSTGRES_PASSWORD=postgres \
+  -v "$PWD/olist:/data:ro" -p 5432:5432 postgres:18
+docker exec -it pg18 psql -U postgres
+\end{codeblock}
+  \item Tạo bảng \code{customers}, \code{sellers}, \code{products}, \code{orders}, \code{order\_\allowbreak{}items}, \code{order\_\allowbreak{}payments} theo cột của file CSV. Đặt \code{PRIMARY KEY} theo khoá logic bạn đoán, \code{FOREIGN KEY} từ \code{orders} tới \code{customers}, từ \code{order\_\allowbreak{}items} tới \code{orders}, \code{products}, \code{sellers}, và \code{CHECK (price >= 0)}.
+\begin{codeblock}
+CREATE TABLE order_items (
+  order_id      text NOT NULL REFERENCES orders,
+  order_item_id int  NOT NULL,
+  product_id    text NOT NULL REFERENCES products,
+  seller_id     text NOT NULL REFERENCES sellers,
+  shipping_limit_date timestamp,
+  price         numeric(12,2) CHECK (price >= 0),
+  freight_value numeric(12,2),
+  PRIMARY KEY (order_id, order_item_id)
+);
+\copy order_items FROM '/data/olist_order_items_dataset.csv' WITH (FORMAT csv, HEADER true)
+\end{codeblock}
+  \item Nạp các bảng cha trước, bảng con sau. Nếu một lệnh \code{\textbackslash{}copy} thất bại vì trùng khoá, đọc thông báo lỗi và sửa giả thuyết khoá.
+  \item Thử bốn câu sai và đọc lỗi: chèn \code{order\_\allowbreak{}items} có \code{price} âm; chèn đơn với \code{customer\_\allowbreak{}id} không tồn tại; chèn trùng khoá chính; xoá một \code{seller} đang được tham chiếu.
+  \item Tạo bảng nhỏ có cột \code{UNIQUE} và cột \code{UNIQUE NULLS NOT DISTINCT}, chèn hai dòng NULL vào mỗi cột, so kết quả.
+  \item Tạo index trên \code{order\_\allowbreak{}items(seller\_\allowbreak{}id)} vì khoá ngoại không tự có index.
+\end{enumerate}
+
+\hoanthanh{sáu bảng nạp đủ dòng của sáu file CSV với PK và FK bật; bạn có ảnh chụp bốn thông báo lỗi ràng buộc và giải thích được vì sao cột \code{UNIQUE} thường nhận hai NULL còn cột \code{NULLS NOT DISTINCT} thì không.}
+
+\subsection{Lab 1.2: SQL phân tích trên DuckDB}
+
+\begin{enumerate}
+  \item Mở DuckDB và tạo bảng từ CSV:
+\begin{codeblock}
+CREATE TABLE orders   AS SELECT * FROM read_csv('olist/olist_orders_dataset.csv');
+CREATE TABLE items    AS SELECT * FROM read_csv('olist/olist_order_items_dataset.csv');
+CREATE TABLE payments AS SELECT * FROM read_csv('olist/olist_order_payments_dataset.csv');
+CREATE TABLE products AS SELECT * FROM read_csv('olist/olist_products_dataset.csv');
+CREATE TABLE customers AS SELECT * FROM read_csv('olist/olist_customers_dataset.csv');
+\end{codeblock}
+  \item Kiểm khoá logic: với mỗi bảng, so \code{count(*)} với số tổ hợp khác nhau của các cột bạn đoán là khoá.
+\begin{codeblock}
+SELECT count(*) AS n_rows,
+       count(DISTINCT (order_id, payment_sequential)) AS n_keys
+FROM payments;
+\end{codeblock}
+  \item So \code{count(DISTINCT customer\_\allowbreak{}id)} với \code{count(DISTINCT customer\_\allowbreak{}unique\_\allowbreak{}id)} trong \code{customers}. Ghi lại cột nào định danh người mua.
+  \item Doanh thu theo tháng và theo bang: join \code{items}, \code{orders}, \code{customers}, \code{GROUP BY}, rồi dùng \code{HAVING} giữ tháng có trên 100 đơn.
+  \item Top 3 danh mục mỗi bang theo doanh thu bằng \code{QUALIFY rank() OVER (...) <= 3}; viết lại cùng câu trên PostgreSQL bằng subquery.
+  \item Doanh thu cộng dồn 7 ngày bằng \code{ROWS BETWEEN 6 PRECEDING AND CURRENT ROW}; tăng trưởng so với tháng trước bằng \code{lag()}.
+  \item Chạy \code{last\_\allowbreak{}value(price) OVER (PARTITION BY order\_\allowbreak{}id ORDER BY order\_\allowbreak{}item\_\allowbreak{}id)} rồi thêm \code{ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING}; giải thích khác biệt bằng frame mặc định.
+  \item Đoán rồi chạy: \code{NULL = NULL}, \code{NULL IS NOT DISTINCT FROM NULL}, \code{count(*)} so với \code{count(order\_\allowbreak{}delivered\_\allowbreak{}customer\_\allowbreak{}date)}, một \code{NOT IN} với subquery có NULL so với \code{NOT EXISTS}.
+\end{enumerate}
+
+\hoanthanh{bạn có một file SQL chạy lại được, trả đúng khoá logic của \code{payments} và \code{items} (số dòng bằng số khoá), câu top 3 cho cùng kết quả trên DuckDB và PostgreSQL, và giải thích bằng frame vì sao \code{last\_\allowbreak{}value} đổi kết quả.}
+
+\subsection{Lab 1.3: Transaction, isolation và EXPLAIN}
+
+\begin{enumerate}
+  \item Mở hai phiên \code{psql} tới container của Lab 1.1. Phiên A: \code{BEGIN;} rồi đọc \code{price} của một món hàng. Phiên B: \code{UPDATE} món đó và \code{COMMIT}. Phiên A đọc lại: ở Read Committed, giá trị đổi (nonrepeatable read).
+  \item Lặp lại với phiên A mở bằng \code{BEGIN ISOLATION LEVEL REPEATABLE READ;}: lần đọc thứ hai vẫn thấy giá trị cũ.
+  \item Thử \code{BEGIN ISOLATION LEVEL READ UNCOMMITTED;} và chứng minh phiên A không đọc được thay đổi chưa commit của phiên B.
+  \item Tạo bảng lớn bằng \code{generate\_\allowbreak{}series} (1 triệu dòng), chạy \code{EXPLAIN ANALYZE} một câu lọc theo một cột trước và sau \code{CREATE INDEX}; so loại node quét, số dòng ước lượng và số dòng thật.
+  \item Chạy \code{EXPLAIN ANALYZE} một câu \code{UPDATE} bên trong \code{BEGIN} … \code{ROLLBACK} và kiểm dữ liệu không đổi.
+\end{enumerate}
+
+\hoanthanh{bạn có bản ghi hai phiên cho thấy nonrepeatable read ở Read Committed và không xảy ra ở Repeatable Read, cùng hai kế hoạch truy vấn trước và sau khi tạo index, mỗi kế hoạch có chú thích loại scan và chênh lệch giữa số dòng ước lượng và số dòng thật.}
+
+\section{Kế hoạch theo tuần}
+
+\begin{xltabular}{\textwidth}{@{}P{1.4cm} L P{1.6cm}@{}}
+\toprule
+\thd{tuần} & \thd{việc} & \thd{giờ} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & PostgreSQL Tutorial chương 2; SQLBolt; CMU bài \#01, \#02; mục \code{SELECT}, 9.2, 9.24 & 10 \\
+2 & mục 7.8, 4.2.7, 4.2.8, 3.5; DuckDB Window Functions, QUALIFY; Lab 1.2; pgexercises nhóm Joins, Aggregates & 10 \\
+3 & mục 5.5; chuẩn hoá; khoá trong lakehouse; Lab 1.1 & 10 \\
+4 & mục 13.2, 14.1, chương 11; CMU bài \#06, \#08; Lab 1.3; thử thách kỹ năng & 5 \\
+thêm & CMU bài \#17; pgexercises nhóm Recursive; homework 1 của CMU Fall 2026 & 6 tới 10 \\
+\end{xltabular}
+
+\begin{thuthach}
+Không có hướng dẫn từng bước. Trên dữ liệu Olist, viết một file SQL trả lời năm câu hỏi: (1) tỉ lệ đơn giao trễ so với ngày hẹn theo từng tháng; (2) mười người bán có doanh thu cao nhất và tỉ lệ giao trễ của họ; (3) phần trăm người mua (theo \code{customer\_\allowbreak{}unique\_\allowbreak{}id}) có từ hai đơn trở lên; (4) với mỗi đơn có nhiều lần thanh toán, kiểu thanh toán chiếm giá trị lớn nhất; (5) danh mục sản phẩm có doanh thu tăng ba tháng liên tiếp. Chạy file trên cả DuckDB và PostgreSQL. Ghi grain của mỗi kết quả trong một dòng chú thích.
+\hoanthanh{năm câu cho cùng kết quả trên hai engine (chấp nhận khác biệt làm tròn), mỗi câu có chú thích grain, và không câu nào cộng \code{payment\_\allowbreak{}value} sau khi join với bảng items.}
+\end{thuthach}
+
+\section{Câu hỏi tự kiểm tra}
+
+\begin{enumerate}
+  \item DDL, DML, DCL, TCL là gì? Cho hai câu lệnh mỗi nhóm, và nêu một hệ quản trị xếp \code{GRANT} vào nhóm khác.
+  \item Vì sao alias đặt trong danh sách \code{SELECT} không dùng được trong \code{WHERE}?
+  \item Vì sao \code{WHERE col = NULL} không trả dòng nào, và nên viết gì thay?
+  \item Vì sao \code{NOT IN (SELECT ...)} có thể không trả dòng nào khi subquery chứa NULL?
+  \item Khi nào điều kiện phải nằm trong \code{HAVING} thay vì \code{WHERE}?
+  \item \code{rank()}, \code{dense\_\allowbreak{}rank()} và \code{row\_\allowbreak{}number()} khác nhau thế nào khi có giá trị bằng nhau?
+  \item Frame mặc định khi có \code{ORDER BY} là gì, và nó ảnh hưởng \code{last\_\allowbreak{}value()} ra sao?
+  \item Primary key, unique constraint và unique index khác nhau thế nào trong PostgreSQL? \code{NULLS NOT DISTINCT} đổi điều gì?
+  \item Khoá tự nhiên, khoá thay thế và khoá logic là gì? Grain của bảng payments Olist là gì?
+  \item Read Committed của PostgreSQL cho phép hiện tượng nào mà Repeatable Read chặn? Read Uncommitted chạy thế nào?
+  \item Trong \code{EXPLAIN ANALYZE}, số dòng ước lượng và số dòng thật cho bạn biết gì? Vì sao phải cẩn thận khi chạy nó với \code{UPDATE}?
+  \item Trên Databricks và trên Iceberg, khai báo khoá chính có chặn được dòng trùng không? Pipeline phải làm gì thay?
+\end{enumerate}
+
+\section{Điểm dễ nhầm}
+
+\begin{xltabular}{\textwidth}{@{}P{3.8cm} L P{3.4cm}@{}}
+\toprule
+\thd{điểm dễ nhầm} & \thd{thực tế} & \thd{docs chính thức} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Nhiều người nghĩ \code{NULL = NULL} là true & So sánh thường với NULL ra NULL; dùng \code{IS NULL} hoặc \code{IS NOT DISTINCT FROM} & \href{https://www.postgresql.org/docs/current/functions-comparison.html}{PostgreSQL 18, mục 9.2} \\
+Cột \code{UNIQUE} chỉ nhận một NULL & Mặc định hai NULL không bằng nhau, nên nhiều dòng NULL lọt qua; \code{NULLS NOT DISTINCT} đổi hành vi này & \href{https://www.postgresql.org/docs/current/ddl-constraints.html}{PostgreSQL 18, mục 5.5.3} \\
+Không ghi frame thì window luôn phủ cả partition & Khi có \code{ORDER BY}, frame mặc định chỉ tới peer cuối cùng của dòng hiện tại; chỉ khi không có \code{ORDER BY} mới phủ cả partition & \href{https://www.postgresql.org/docs/current/sql-expressions.html}{PostgreSQL 18, mục 4.2.8} \\
+\code{EXPLAIN ANALYZE} chỉ in kế hoạch & Nó chạy thật câu lệnh, side effect vẫn xảy ra; bọc trong \code{BEGIN} … \code{ROLLBACK} & \href{https://www.postgresql.org/docs/current/using-explain.html}{PostgreSQL 18, mục 14.1.2} \\
+READ UNCOMMITTED của PostgreSQL cho đọc dữ liệu chưa commit & Nó chạy như Read Committed; PostgreSQL chỉ cài ba mức khác nhau & \href{https://www.postgresql.org/docs/current/transaction-iso.html}{PostgreSQL 18, mục 13.2} \\
+CTE luôn được tính riêng một lần và chặn tối ưu & CTE không đệ quy, không side effect, tham chiếu một lần được gộp vào câu cha; \code{[NOT] MATERIALIZED} điều khiển việc đó & \href{https://www.postgresql.org/docs/current/queries-with.html}{PostgreSQL 18, mục 7.8.3} \\
+Khai báo \code{FOREIGN KEY} là có index trên cột tham chiếu & PostgreSQL không tự tạo index đó; tự tạo khi cần join hoặc xoá bảng cha & \href{https://www.postgresql.org/docs/current/ddl-constraints.html}{PostgreSQL 18, mục 5.5.5} \\
+Càng nhiều index càng nhanh & Index thêm chi phí cho cả hệ thống, cần dùng có chọn lọc & \href{https://www.postgresql.org/docs/current/indexes.html}{PostgreSQL 18, chương 11} \\
+\code{GRANT} là DCL ở mọi hệ quản trị & Oracle xếp \code{GRANT}, \code{REVOKE} vào DDL và tự commit quanh mỗi câu DDL & \href{https://docs.oracle.com/en/database/oracle/oracle-database/23/sqlrf/Types-of-SQL-Statements.html}{Oracle 23: Types of SQL Statements} \\
+Khai báo \code{PRIMARY KEY} trong lakehouse là có khoá duy nhất & Databricks không kiểm PK, FK, UNIQUE; Iceberg không bảo đảm tính duy nhất của identifier field; giữ bằng khử trùng, \code{MERGE} và test & \href{https://docs.databricks.com/aws/en/tables/constraints}{Databricks: Constraints}, \href{https://iceberg.apache.org/spec/\#identifier-field-ids}{Iceberg spec} \\
+\end{xltabular}

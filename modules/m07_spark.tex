@@ -1,0 +1,189 @@
+\modulechapter{7}{Apache Spark và tính toán phân tán}
+\moduleinfo{Trung cấp}{30 giờ}{Module 1, 5}
+
+Khi dữ liệu và phép tính vượt sức một máy, bạn chia dữ liệu thành partition và chạy song song trên nhiều executor. Spark là engine làm việc đó: nó biến DataFrame hoặc câu SQL thành kế hoạch thực thi gồm job, stage và task. Trong lakehouse của lộ trình này, Spark là engine ghi chính, đưa dữ liệu từ raw qua staging tới marts trên bảng Iceberg. Học xong, bạn đọc được \code{EXPLAIN} và Spark UI để biết vì sao một truy vấn chậm, và viết được \code{MERGE INTO} Iceberg có kế hoạch hợp lý.
+
+\section{Bạn sẽ học được}
+\begin{itemize}
+  \item Giải thích vai trò của driver, executor và cluster manager, và cách Spark Connect tách client khỏi driver.
+  \item Phân biệt transformation với action, phép biến đổi narrow với wide, và chỉ ra ranh giới stage nằm ở shuffle.
+  \item Đọc \code{EXPLAIN} ở các chế độ khác nhau để thấy Exchange, kiểu join và bộ lọc được đẩy xuống.
+  \item Chọn chiến lược join và cấu hình partition dựa trên số liệu, kể cả khi AQE đang bật.
+  \item Chẩn đoán data skew trên Spark UI và chọn cách xử lý phù hợp.
+  \item Viết \code{MERGE INTO} và overwrite partition trên bảng Iceberg từ Spark một cách an toàn.
+  \item Nêu những thay đổi hành vi chính khi chuyển từ Spark 3.5 lên 4.x.
+\end{itemize}
+
+\section{Nội dung chính}
+
+\subsection{Kiến trúc và mô hình thực thi}
+\begin{enumerate}
+  \item \textbf{Vì sao phân tán.} Một máy có giới hạn về CPU, bộ nhớ và đĩa; mở rộng ngang nghĩa là chia dữ liệu thành partition và xử lý song song. Cái giá phải trả là dữ liệu phải di chuyển qua mạng khi một phép tính cần các dòng cùng khoá nằm chung một chỗ.
+  \item \textbf{Driver, executor, cluster manager.} Driver chạy hàm \code{main} và lập kế hoạch; executor chạy task và giữ dữ liệu cache; cluster manager (standalone, YARN, Kubernetes) cấp tài nguyên. Mỗi driver có một web UI, mặc định ở cổng 4040 (\href{https://spark.apache.org/docs/latest/cluster-overview.html}{Cluster Mode Overview}, \href{https://spark.apache.org/docs/latest/web-ui.html}{Web UI}).
+  \item \textbf{SparkSession, DataFrame và Spark SQL.} DataFrame và SQL đi qua cùng một bộ tối ưu, nên hai cách viết cho cùng kế hoạch (\href{https://spark.apache.org/docs/latest/sql-programming-guide.html}{Spark SQL Guide}).
+  \item \textbf{Transformation, action và đánh giá lười.} Transformation chỉ ghi lại kế hoạch; chỉ khi gọi action như \code{count()}, \code{collect()} hay ghi bảng thì Spark mới chạy job (\href{https://spark.apache.org/docs/latest/rdd-programming-guide.html}{RDD Programming Guide}). Phép narrow như \code{filter} xử lý từng partition riêng; phép wide như \code{groupBy} hay join cần shuffle.
+  \item \textbf{Job, stage, task.} Một action tạo một hoặc nhiều job; mỗi job chia thành stage tại các ranh giới shuffle; mỗi stage có một task cho mỗi partition. Bạn thấy cấu trúc này trong tab Jobs và Stages của Spark UI.
+  \item \textbf{Catalyst và kế hoạch.} Truy vấn đi qua logical plan, logical plan đã tối ưu, rồi physical plan. \code{EXPLAIN} mặc định chỉ in physical plan; \code{EXTENDED} in cả các logical plan, \code{FORMATTED} in phần khung và chi tiết từng node, \code{COST} in thống kê nếu có, \code{CODEGEN} in mã sinh ra (\href{https://spark.apache.org/docs/latest/sql-ref-syntax-qry-explain.html}{EXPLAIN}). Trong physical plan, node \code{Exchange} chính là một shuffle.
+\end{enumerate}
+
+\subsection{Hiệu năng: shuffle, join, AQE, skew}
+\begin{enumerate}[resume]
+  \item \textbf{Partition sau shuffle.} \code{spark.sql.\allowbreak shuffle.partitions} mặc định là 200 cho join và aggregation (\href{https://spark.apache.org/docs/latest/sql-performance-tuning.html}{Performance Tuning}). \code{repartition(n)} luôn shuffle; \code{coalesce(n)} gộp partition mà không shuffle toàn bộ, chỉ dùng để giảm số partition.
+  \item \textbf{Chiến lược join.} Spark có broadcast hash join, sort-merge join, shuffled hash join và nested loop join. Bảng nhỏ hơn \code{spark.sql.\allowbreak autoBroadcast\allowbreak JoinThreshold} (mặc định 10485760 byte, tức 10 MB) được broadcast; đặt \code{-1} để tắt. Hint join gồm \code{BROADCAST}, \code{MERGE}, \code{SHUFFLE\_HASH}, \code{SHUFFLE\_REPLICATE\_NL} (\href{https://spark.apache.org/docs/latest/sql-ref-syntax-qry-select-hints.html}{Hints}).
+  \item \textbf{Adaptive Query Execution (AQE).} AQE tối ưu lại kế hoạch lúc chạy dựa trên thống kê thật sau shuffle, và bật mặc định từ Spark 3.2.0. Ba tính năng chính: gộp partition sau shuffle, đổi sort-merge join sang broadcast hash join hoặc shuffled hash join, và tách task bị skew trong sort-merge join (\href{https://spark.apache.org/docs/latest/sql-performance-tuning.html}{Performance Tuning}).
+  \item \textbf{Data skew.} Khi vài khoá chiếm phần lớn dữ liệu, vài task chạy lâu hơn hẳn phần còn lại; tab Stages cho thấy thời gian task lớn nhất so với trung vị. AQE skew join chỉ xử lý skew trong sort-merge join; aggregation lệch thì cần cách khác như salting (thêm hậu tố ngẫu nhiên vào khoá, tính hai bước).
+  \item \textbf{Cache và persist.} \code{cache()} cũng lười: dữ liệu chỉ được lưu khi một action chạy. Chọn storage level phù hợp và gọi \code{unpersist()} khi xong (\href{https://spark.apache.org/docs/latest/rdd-programming-guide.html\#rdd-persistence}{RDD Persistence}).
+  \item \textbf{Spark UI.} Các tab Jobs, Stages, Storage, Environment, Executors và SQL cho bạn thấy shuffle read/write, spill, GC và thời gian từng task (\href{https://spark.apache.org/docs/latest/web-ui.html}{Web UI}). Nếu cổng 4040 bận, Spark thử 4041, 4042 và ghi cổng đã chọn vào log.
+\end{enumerate}
+
+\subsection{Spark Connect, PySpark và phiên bản}
+\begin{enumerate}[resume]
+  \item \textbf{Spark Connect.} Client đổi thao tác DataFrame thành unresolved logical plan, mã hoá bằng protocol buffers và gửi tới server qua gRPC; client mặc định nối cổng 15002. Client PySpark qua Connect không dùng được \code{SparkContext} và RDD (\href{https://spark.apache.org/docs/latest/spark-connect-overview.html}{Spark Connect Overview}). Server khởi động bằng \code{sbin/\allowbreak start-connect-server.sh}; với Spark 3.5, đọc trang này ở bộ docs 3.5.9 vì cách khởi động khác.
+  \item \textbf{Classic và Connect trong Spark 4.x.} Spark 4.0 thêm client Python nhẹ \code{pyspark-client}, cấu hình \code{spark.api.mode} để bật tắt Connect cho ứng dụng, và một tarball phụ bật Connect sẵn (\href{https://spark.apache.org/releases/spark-release-4-0-0.html}{Spark 4.0.0 release notes}). Nếu bạn không dùng các cơ chế Connect, session vẫn chạy như trước, tức chế độ Classic.
+  \item \textbf{PySpark và Python UDF.} Với code DataFrame, kế hoạch chạy trong JVM; chi phí riêng của Python nằm chủ yếu ở UDF, nơi dữ liệu phải chuyển sang Python worker. Spark 4.2.0 bật tối ưu Arrow cho Python UDF theo mặc định (\href{https://spark.apache.org/releases/spark-release-4-2-0.html}{Spark 4.2.0 release notes}).
+  \item \textbf{Chính sách phiên bản.} Bản feature được bảo trì 6 tháng, bản LTS (bản cuối của mỗi dòng major) 18 tháng. Nhánh 3.5 có LTS mở rộng tới 11/2027 và trong giai đoạn này chỉ nhận vá bảo mật; LTS của dòng 4.x theo kế hoạch là 4.5.0 (\href{https://spark.apache.org/versioning-policy.html}{Versioning policy}).
+  \item \textbf{Spark 4.0 đổi gì.} ANSI SQL mode bật mặc định, JDK 17 là mặc định (bỏ JDK 8 và 11), Scala 2.13 là mặc định (bỏ 2.12) (\href{https://spark.apache.org/releases/spark-release-4-0-0.html}{Spark 4.0.0 release notes}). Với ANSI, phép \code{CAST} không hợp lệ báo lỗi thay vì trả NULL; xem \href{https://spark.apache.org/docs/latest/sql-migration-guide.html}{SQL Migration Guide} trước khi nâng cấp.
+\end{enumerate}
+
+\subsection{Ghi Iceberg từ Spark và streaming}
+\begin{enumerate}[resume]
+  \item \textbf{MERGE INTO.} Mỗi dòng của bảng đích chỉ được một dòng nguồn cập nhật; nếu nhiều dòng nguồn khớp cùng một dòng đích, câu lệnh báo lỗi, nên hãy khử trùng nguồn trước. Iceberg khuyên dùng \code{MERGE INTO} thay cho \code{INSERT OVERWRITE} vì nó chỉ viết lại file bị ảnh hưởng (\href{https://iceberg.apache.org/docs/latest/spark-writes/}{Iceberg Spark Writes}). \code{MERGE} và \code{CALL} cần bật Iceberg SQL extensions trên phía Spark chạy truy vấn.
+  \item \textbf{Overwrite partition.} Chế độ overwrite mặc định của Spark là static; Iceberg khuyên đặt \code{spark.sql.\allowbreak sources.\allowbreak partitionOverwriteMode=dynamic} để chỉ thay các partition có dòng trong kết quả. Với DataFrame API, \code{writeTo(t).\allowbreak overwritePartitions()} tương đương overwrite động.
+  \item \textbf{Phân phối khi ghi.} \code{write.\allowbreak distribution-mode} có các giá trị \code{none}, \code{hash}, \code{range}; \code{hash} là mặc định từ Iceberg 1.2.0 và thêm một shuffle theo giá trị partition trước khi ghi, đổi lại ít file nhỏ hơn (\href{https://iceberg.apache.org/docs/latest/spark-writes/}{Iceberg Spark Writes}).
+  \item \textbf{Structured Streaming, chỉ giới thiệu.} Spark có API streaming dùng chung DataFrame; module streaming sau sẽ học kỹ. Xem mục Structured Streaming trong \href{https://spark.apache.org/docs/latest/}{Spark docs}.
+\end{enumerate}
+
+\section{Bắt đầu}
+\begin{itemize}
+  \item \href{https://spark.apache.org/docs/latest/spark-connect-overview.html}{Spark Connect Overview}: chạy server Spark Connect và nối từ PySpark bằng \code{SparkSession.\allowbreak builder.\allowbreak remote(\allowbreak "sc://localhost:15002")}.
+  \item \href{https://iceberg.apache.org/spark-quickstart/}{Iceberg Spark Quickstart}: tạo catalog và bảng Iceberg đầu tiên từ Spark.
+  \item \href{https://spark.apache.org/docs/latest/sql-performance-tuning.html}{SQL Performance Tuning}: đọc mục AQE và join hint trước khi làm lab 2.
+\end{itemize}
+
+\begin{ghichu}
+Docs \code{latest} của Spark mô tả bản mới nhất (4.3.0 khi kiểm ngày 02/11/2026). Nếu lab chạy 3.5.x, đọc bộ docs có số phiên bản, ví dụ \code{spark.apache.org/\allowbreak docs/3.5.9/}. Chọn gói \code{iceberg-spark-runtime} đúng phiên bản Spark và Scala theo trang Releases của Iceberg.
+\end{ghichu}
+
+\section{Tài liệu chính thức}
+\begin{xltabular}{\textwidth}{@{}P{4.6cm} L P{1.8cm}@{}}
+\toprule
+\thd{tài liệu} & \thd{nội dung cần đọc} & \thd{thời lượng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://spark.apache.org/docs/latest/cluster-overview.html}{Spark: Cluster Mode Overview} & driver, executor, cluster manager, thuật ngữ job, stage, task & 1 giờ \\
+\href{https://spark.apache.org/docs/latest/sql-programming-guide.html}{Spark SQL, DataFrames and Datasets Guide} & Getting Started, Data Sources (Parquet, JDBC) & 2 giờ \\
+\href{https://spark.apache.org/docs/latest/rdd-programming-guide.html}{RDD Programming Guide} & transformation và action, shuffle, persistence; chỉ đọc khái niệm & 1,5 giờ \\
+\href{https://spark.apache.org/docs/latest/sql-performance-tuning.html}{SQL Performance Tuning} & caching, partition, join hint, toàn bộ mục AQE & 2 giờ \\
+\href{https://spark.apache.org/docs/latest/sql-ref-syntax-qry-explain.html}{EXPLAIN} & các chế độ \code{EXTENDED}, \code{FORMATTED}, \code{COST}, \code{CODEGEN} & 0,5 giờ \\
+\href{https://spark.apache.org/docs/latest/web-ui.html}{Web UI} & Jobs, Stages, Storage, Executors, SQL & 1 giờ \\
+\href{https://spark.apache.org/docs/latest/spark-connect-overview.html}{Spark Connect Overview} & kiến trúc, cách khởi động server, API không hỗ trợ & 1 giờ \\
+\href{https://spark.apache.org/versioning-policy.html}{Spark Versioning Policy} & thời gian bảo trì, LTS mở rộng của 3.5 & 0,3 giờ \\
+\href{https://spark.apache.org/releases/spark-release-4-0-0.html}{Spark 4.0.0 release notes}, \href{https://spark.apache.org/docs/latest/sql-migration-guide.html}{SQL Migration Guide} & ANSI mode, JDK, Scala, Spark Connect; mục nâng cấp từ 3.5 & 1,5 giờ \\
+\href{https://iceberg.apache.org/docs/latest/spark-writes/}{Iceberg: Spark Writes} & MERGE INTO, INSERT OVERWRITE, Writing Distribution Modes, Controlling File Sizes & 1,5 giờ \\
+\href{https://iceberg.apache.org/docs/latest/spark-procedures/}{Iceberg: Spark Procedures} & \code{rewrite\_data\_files}, \code{expire\_snapshots} & 0,5 giờ \\
+\end{xltabular}
+
+\section{Khoá học miễn phí}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{2.6cm}@{}}
+\toprule
+\thd{khoá} & \thd{nội dung} & \thd{miễn phí} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://pdos.csail.mit.edu/6.824/}{MIT 6.5840 Distributed Systems (Spring 2026)} & Lab 1 viết MapReduce bằng Go; lịch bài giảng ở trang Schedule. Làm Lab 1 để hiểu map, shuffle, reduce trước khi học Spark sâu & trang khoá và đề lab công khai \\
+\end{xltabular}
+
+\section{Lab thực hành}
+
+\subsection{Lab 7.1: Spark Connect và đánh giá lười trên Olist}
+\begin{enumerate}
+  \item Thêm vào Docker Compose của stack tham chiếu một dịch vụ Spark chạy Spark Connect server, mở cổng 15002 và 4040, cấu hình catalog Iceberg REST và storage RustFS.
+  \item Từ máy của bạn, cài \code{pyspark-client} (Spark 4.x) hoặc \code{pyspark[connect]} đúng phiên bản server, rồi nối bằng \code{SparkSession.builder.\allowbreak remote(...)}.
+  \item Đọc \code{olist\_orders\_dataset.csv} và \code{olist\_order\_items\_dataset.csv}. Viết năm transformation (lọc, chọn cột, đổi kiểu thời gian) mà không gọi action; mở tab Jobs và xác nhận chưa có job nào.
+  \item Gọi \code{count()}; xem job, stage, task xuất hiện. Sau đó chạy \code{groupBy(\allowbreak "order\_status").\allowbreak count()} và đếm số stage.
+  \item Thử gọi \code{spark.sparkContext} từ client Connect và ghi lại lỗi nhận được.
+\end{enumerate}
+\hoanthanh{bạn có ảnh chụp tab Jobs trước và sau action, và giải thích được vì sao \code{groupBy} tạo thêm một stage.}
+
+\subsection{Lab 7.2: EXPLAIN và chiến lược join}
+\begin{enumerate}
+  \item Join \code{order\_items} với \code{products} theo \code{product\_id}, rồi aggregate doanh thu theo \code{product\_category\_name}.
+  \item Chạy \code{EXPLAIN FORMATTED}. Tìm node \code{Exchange} và kiểu join; ghi lại kích thước ước lượng của \code{products}.
+  \item Đặt \code{spark.sql.\allowbreak autoBroadcast\allowbreak JoinThreshold=-1}, chạy lại và so kiểu join. Thử các hint \code{BROADCAST}, \code{MERGE}, \code{SHUFFLE\_HASH}.
+  \item Tắt rồi bật \code{spark.sql.\allowbreak adaptive.enabled}; so physical plan cuối cùng trong tab SQL (dòng \code{AdaptiveSparkPlan} cho biết kế hoạch cuối).
+\end{enumerate}
+\hoanthanh{bạn có bảng so sánh bốn cấu hình (mặc định, tắt broadcast, từng hint, tắt AQE) với kiểu join, số Exchange và thời gian chạy.}
+
+\subsection{Lab 7.3: skew và số partition}
+\begin{enumerate}
+  \item Đếm số đơn theo \code{customer\_state} (join \code{orders} với \code{customers}) và ghi lại bang chiếm nhiều dòng nhất.
+  \item Tạo dữ liệu skew có kiểm soát: nhân bản \code{order\_items} sao cho 90\% dòng có cùng một \code{seller\_id}, rồi join với \code{sellers} và aggregate.
+  \item Trong tab Stages, so thời gian task lớn nhất với trung vị. Bật tắt \code{spark.sql.\allowbreak adaptive.\allowbreak skewJoin.enabled} và so.
+  \item Với aggregation lệch, thử salting: thêm cột \code{salt} ngẫu nhiên từ 0 tới 15, aggregate theo khoá và salt, rồi aggregate lần hai theo khoá.
+  \item So \code{spark.sql.\allowbreak shuffle.partitions} 200 với 8 khi AQE tắt và khi AQE bật.
+\end{enumerate}
+\hoanthanh{bạn chỉ ra được trên Spark UI task bị skew trước và sau khi sửa, và giải thích vì sao AQE xử lý được trường hợp join nhưng không xử lý được trường hợp aggregation.}
+
+\subsection{Lab 7.4: ghi Iceberg và MERGE INTO}
+\begin{enumerate}
+  \item Tạo bảng Iceberg \code{lake.staging.orders} phân vùng theo \code{months(\allowbreak order\_purchase\_\allowbreak timestamp)}, nạp toàn bộ \code{orders}.
+  \item Tạo một DataFrame cập nhật: 1.000 đơn đổi \code{order\_status} và 100 đơn mới. Cố ý để vài \code{order\_id} trùng trong nguồn, chạy \code{MERGE INTO} và đọc lỗi; sau đó khử trùng nguồn bằng \code{row\_number()} và chạy lại.
+  \item Chạy \code{EXPLAIN} cho câu \code{MERGE}; chỉ ra kiểu join và Exchange trước bước ghi.
+  \item Đếm data file qua bảng metadata \code{lake.staging.orders.files} và snapshot qua \code{.snapshots} (\href{https://iceberg.apache.org/docs/latest/spark-queries/}{Iceberg Spark Queries}). Đặt \code{write.\allowbreak distribution-mode} là \code{none} rồi \code{hash}, ghi lại và so số file.
+\end{enumerate}
+\hoanthanh{câu \code{MERGE} chạy lại lần hai không đổi số dòng, và bạn giải thích được số file khác nhau giữa hai chế độ phân phối.}
+
+\section{Kế hoạch theo tuần}
+\begin{xltabular}{\textwidth}{@{}P{1.4cm} L P{1.4cm}@{}}
+\toprule
+\thd{tuần} & \thd{việc} & \thd{giờ} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & Cluster Mode Overview, Spark SQL Guide, RDD Programming Guide phần khái niệm, Spark Connect Overview; MIT 6.5840 Lab 1 nếu muốn; Lab 7.1 & 10 \\
+2 & Performance Tuning, EXPLAIN, Hints, Web UI; Lab 7.2 và 7.3 & 10 \\
+3 & Iceberg Spark Writes, Spark 4.0 release notes, Migration Guide; Lab 7.4; thử thách kỹ năng & 10 \\
+thêm & Iceberg Spark Procedures (\code{rewrite\_data\_files}); thử cùng lab trên cả Spark 3.5.x và 4.x & 4 \\
+\end{xltabular}
+
+\begin{thuthach}
+Bảng mart \code{lake.marts.revenue\_by\_category\_month} được tính từ \code{orders}, \code{order\_items}, \code{products} và \code{product\_category\_name\_translation}, rồi ghi đè theo tháng vào Iceberg. Tự viết truy vấn, đo thời gian lần đầu, sau đó làm nó nhanh hơn ít nhất 30\% mà kết quả không đổi. Mỗi thay đổi phải có bằng chứng từ \code{EXPLAIN} hoặc Spark UI, và lần chạy lại chỉ được thay các partition tháng có dữ liệu.
+\hoanthanh{bạn có báo cáo một trang gồm thời gian trước và sau, kế hoạch trước và sau, lý do của từng thay đổi, và kiểm tra rằng tổng doanh thu không đổi.}
+\end{thuthach}
+
+\section{Câu hỏi tự kiểm tra}
+\begin{enumerate}
+  \item Driver làm gì, executor làm gì? Vì sao \code{collect()} trên bảng lớn có thể làm hỏng job?
+  \item Cái gì tạo ra một stage mới? Chỉ ra dấu hiệu của nó trong \code{EXPLAIN}.
+  \item Một stage có 200 task, 199 task xong trong 5 giây, một task mất 4 phút. Nguyên nhân có thể là gì, xem ở đâu, và kể hai cách sửa.
+  \item Khi nào Spark chọn broadcast hash join, và khi nào broadcast gây hại?
+  \item AQE quyết định được gì lúc chạy mà bộ tối ưu không quyết được lúc lập kế hoạch?
+  \item \code{repartition(n)} khác \code{coalesce(n)} thế nào?
+  \item Khi nào \code{.cache()} là ý tồi?
+  \item Vì sao client PySpark qua Spark Connect không gọi được \code{spark.sparkContext}?
+  \item \code{MERGE INTO} Iceberg báo lỗi khi nào, và bạn chuẩn bị dữ liệu nguồn ra sao để tránh?
+  \item Overwrite static và dynamic khác nhau thế nào khi bạn chỉ muốn ghi lại một tháng?
+  \item Kể ba thay đổi trong Spark 4.0 có thể làm hỏng một job viết cho 3.5.
+\end{enumerate}
+
+\section{Điểm dễ nhầm}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{3.4cm}@{}}
+\toprule
+\thd{điểm dễ nhầm} & \thd{thực tế} & \thd{docs chính thức} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Nhiều người nghĩ Spark chạy trong bộ nhớ nên không chạm đĩa & Shuffle ghi dữ liệu ra file và cache có thể tràn xuống đĩa; Web UI hiển thị shuffle write và spill & \href{https://spark.apache.org/docs/latest/web-ui.html}{Web UI} \\
+Càng nhiều partition càng nhanh & Quá nhiều task nhỏ làm tăng chi phí lập lịch và sinh nhiều file nhỏ; AQE gộp partition sau shuffle vì lý do này & \href{https://spark.apache.org/docs/latest/sql-performance-tuning.html}{Performance Tuning} \\
+\code{cache()} lưu dữ liệu ngay & \code{cache()} lười; dữ liệu chỉ được lưu khi có action & \href{https://spark.apache.org/docs/latest/rdd-programming-guide.html\#rdd-persistence}{RDD Persistence} \\
+AQE sửa mọi loại skew & AQE skew join chỉ xử lý skew trong sort-merge join & \href{https://spark.apache.org/docs/latest/sql-performance-tuning.html}{Performance Tuning} \\
+Spark Connect là một engine khác & Cùng engine; client gửi unresolved logical plan qua gRPC và server lập kế hoạch như bình thường & \href{https://spark.apache.org/docs/latest/spark-connect-overview.html}{Spark Connect Overview} \\
+Từ Spark 4.0, Connect là chế độ mặc định & Spark 4.0 thêm \code{pyspark-client}, \code{spark.api.mode} và một tarball phụ bật Connect sẵn; không dùng cơ chế Connect thì session vẫn chạy Classic & \href{https://spark.apache.org/releases/spark-release-4-0-0.html}{Spark 4.0.0 release notes} \\
+\code{CAST} sai kiểu luôn trả NULL & Từ Spark 4.0, ANSI mode bật mặc định nên \code{CAST} không hợp lệ báo lỗi; muốn NULL thì dùng \code{try\_cast} một cách có chủ đích & \href{https://spark.apache.org/docs/latest/sql-migration-guide.html}{SQL Migration Guide} \\
+\code{INSERT OVERWRITE} chỉ thay partition có dữ liệu mới & Chế độ mặc định của Spark là static; cần \code{partitionOverwriteMode=dynamic} & \href{https://iceberg.apache.org/docs/latest/spark-writes/}{Iceberg Spark Writes} \\
+\end{xltabular}

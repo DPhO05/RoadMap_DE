@@ -1,0 +1,207 @@
+\modulechapter{13}{Cloud và vận hành production}
+\moduleinfo{Nâng cao}{30 giờ}{Module 5, 6, 9}
+
+Đến đây toàn bộ lakehouse chạy trên laptop. Module này đưa một lát của nó lên AWS theo cách an toàn chi phí: cảnh báo chi phí có trước mọi tài nguyên, mọi tài nguyên dựng bằng Terraform và xoá được bằng \code{terraform destroy}. Bạn sẽ đặt dữ liệu Olist lên S3, khai báo bảng trong Glue Data Catalog, truy vấn bằng Athena, rồi thử bảng Iceberg qua endpoint Iceberg REST của Glue hoặc S3 Tables. Cuối module có bảng ánh xạ sang Google Cloud và thông tin hai chứng chỉ Data Engineer phổ biến.
+
+\section{Bạn sẽ học được}
+\begin{itemize}
+  \item Giải thích gói Free và gói Paid của AWS Free Tier hiện hành, và dựng cảnh báo chi phí trước khi tạo tài nguyên.
+  \item Viết IAM policy theo quyền tối thiểu cho một job đọc một prefix và ghi một prefix khác.
+  \item Chọn storage class và lifecycle rule cho S3, tránh bẫy với object nhỏ.
+  \item Truy vấn dữ liệu trên S3 bằng Athena qua Glue Data Catalog và giảm byte quét.
+  \item Nối engine Iceberg vào endpoint Iceberg REST của Glue hoặc S3 Tables, biết giới hạn của từng endpoint.
+  \item Dựng và xoá toàn bộ tài nguyên bằng Terraform.
+  \item Ánh xạ các dịch vụ AWS sang Google Cloud và đọc exam guide của DEA-C01 và Professional Data Engineer.
+\end{itemize}
+
+\section{Nội dung chính}
+
+\subsection{Tài khoản và chi phí}
+\begin{enumerate}
+  \item \textbf{AWS Free Tier hiện hành.} Khi đăng ký, bạn nhận 100 USD credit và có thể nhận thêm tới 100 USD qua các hoạt động; bạn chọn gói Free hoặc Paid. Gói Free không tính tiền, chỉ dùng một số dịch vụ, và kết thúc sau 6 tháng hoặc khi hết credit, tuỳ điều nào tới trước; khi đó tài khoản tự đóng, AWS giữ dữ liệu 90 ngày, nâng lên gói Paid trong thời gian này thì giữ được tài khoản và phần credit còn lại (\href{https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/free-tier-plans.html}{Choosing a Free Tier plan}). Theo \href{https://aws.amazon.com/free/terms}{AWS Free Tier Terms}, credit hết hạn sau 12 tháng kể từ ngày mở tài khoản; nên credit chỉ dùng tới tháng thứ 12 nếu bạn đã chuyển sang gói Paid.
+  \item \textbf{Dịch vụ trong gói Free.} Danh sách cho kiểu đăng ký mới có S3, Glue, Athena, Lake Formation, VPC, IAM, Budgets, Cost Explorer; Amazon EMR chỉ có ở gói Paid (\href{https://docs.aws.amazon.com/accounts/latest/reference/supported-services-sign-up-new.md}{Supported services}). Kiểm lại danh sách trước khi dùng một dịch vụ mới, kể cả EMR Serverless và S3 Tables.
+  \item \textbf{Budgets.} AWS Budgets theo dõi chi tiêu và gửi cảnh báo; cảnh báo không tự dừng chi tiêu, trừ khi bạn cấu hình budget action (\href{https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html}{AWS Budgets}, \href{https://aws.amazon.com/aws-cost-management/aws-budgets/pricing/}{Budgets pricing}). Bật thêm \href{https://docs.aws.amazon.com/cost-management/latest/userguide/getting-started-ad.html}{Cost Anomaly Detection}.
+  \item \textbf{IAM.} Bảo vệ root bằng MFA và không tạo access key cho root; dùng danh tính có MFA cho người, và role với credential tạm thời cho workload; cấp quyền tối thiểu (\href{https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html}{IAM best practices}). Role có trust policy (ai được assume) tách khỏi permissions policy (được làm gì) (\href{https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles.html}{IAM roles}).
+\end{enumerate}
+
+\subsection{Lưu trữ và truy vấn}
+\begin{enumerate}[resume]
+  \item \textbf{S3 storage class.} Standard-IA tính object dưới 128 KB như 128 KB và tính tối thiểu 30 ngày lưu, nên không hợp với file nhỏ hay sống ngắn (\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html}{S3 storage classes}).
+  \item \textbf{Lifecycle.} Từ 09/2024, lifecycle mặc định không chuyển object dưới 128 KB sang storage class khác; muốn chuyển phải thêm bộ lọc kích thước (\code{ObjectSizeGreaterThan}, \code{ObjectSizeLessThan}), và mỗi lần chuyển là một transition request có tính phí (\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/lifecycle-transition-general-considerations.html}{Lifecycle transitions}). Bật \href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/Versioning.html}{versioning} và dùng lifecycle để xoá version cũ.
+  \item \textbf{Glue Data Catalog.} Catalog chứa database và bảng mà Athena, Glue, EMR dùng chung; có thể khai báo bảng bằng tay, bằng Terraform, hoặc bằng crawler (\href{https://docs.aws.amazon.com/glue/latest/dg/catalog-and-crawler.html}{Data Catalog và crawler}).
+  \item \textbf{Endpoint Iceberg REST của Glue.} Dạng \code{https://glue.<region>.\allowbreak amazonaws.com/\allowbreak iceberg}; \code{warehouse} là account ID; engine ký SigV4 với signing name \code{glue}. Chỉ hỗ trợ namespace một cấp; mặc định tạo bảng spec v2; lưu được trên S3 thường và S3 Tables; với client OAuth, Glue áp quyền Lake Formation ở mỗi request (\href{https://docs.aws.amazon.com/glue/latest/dg/connect-glu-iceberg-rest.html}{Glue Iceberg REST endpoint}).
+  \item \textbf{S3 Tables.} Table bucket lưu bảng Iceberg với bảo trì do AWS quản lý. Endpoint REST riêng có dạng \code{https://s3tables.<region>.\allowbreak amazonaws.com/\allowbreak iceberg}, \code{warehouse} là ARN của table bucket, ký SigV4 với signing name \code{s3tables}. Giới hạn: chỉ namespace một cấp, không có API view, không hỗ trợ \code{stage-create} nên \code{CREATE TABLE AS SELECT} không chạy, \code{DROP TABLE} phải có \code{PURGE}, không hỗ trợ \code{metadata.json} trên 50 MB; compaction và quản lý snapshot làm qua API bảo trì của S3 Tables. AWS khuyên dùng endpoint của Glue nếu cần quản trị tập trung và phân quyền chi tiết (\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-tables-integrating-open-source.html}{S3 Tables REST endpoint}).
+  \item \textbf{Athena.} Athena đọc bảng trong Glue Data Catalog, kể cả bảng Iceberg (\href{https://docs.aws.amazon.com/athena/latest/ug/querying-iceberg.html}{Querying Iceberg tables}). Giá tính theo byte quét, làm tròn lên MB, tối thiểu 10 MB mỗi câu; ví dụ trên trang giá dùng 5 USD mỗi TB; câu lỗi và câu DDL không tính (\href{https://aws.amazon.com/athena/pricing/}{Athena pricing}). Parquet, partition và chọn đúng cột làm giảm byte quét.
+  \item \textbf{Tính toán Spark có quản lý.} Glue 6.0 (21/08/2026) chạy Spark 4.1, Python 3.13, hỗ trợ đầy đủ Iceberg v3, giảm giá 30\% (\href{https://aws.amazon.com/about-aws/whats-new/2026/08/aws-glue-6-0-price-reduction-iceberg-v3/}{What's New: Glue 6.0}). Glue job cấu hình theo \code{MaxCapacity} cần từ 2 tới 100 DPU, mặc định 10; timeout mặc định 480 phút với Glue 5.0 trở lên, nên luôn đặt timeout ngắn cho job thử (\href{https://docs.aws.amazon.com/glue/latest/dg/aws-glue-api-jobs-job.html}{Glue Jobs API}). EMR Serverless chạy Spark mà không quản lý cluster (\href{https://docs.aws.amazon.com/emr/latest/EMR-Serverless-UserGuide/getting-started.html}{EMR Serverless}).
+  \item \textbf{Mạng.} NAT gateway tính theo giờ khi còn tồn tại, giờ lẻ tính tròn, cộng phí mỗi GB xử lý; mỗi địa chỉ public IPv4 cũng tính theo giờ (\href{https://aws.amazon.com/vpc/pricing/}{VPC pricing}). Trong lab, tránh tạo NAT gateway.
+\end{enumerate}
+
+\subsection{Hạ tầng dưới dạng code và vận hành}
+\begin{enumerate}[resume]
+  \item \textbf{Terraform.} Viết tài nguyên bằng HCL, \code{terraform plan} xem thay đổi, \code{apply} tạo, \code{destroy} xoá những gì có trong state; thứ tạo bằng tay ngoài state vẫn còn và vẫn tính tiền (\href{https://developer.hashicorp.com/terraform/tutorials/aws-get-started}{Get Started - AWS}). State chứa thông tin nhạy cảm; với nhóm, lưu state ở backend từ xa như \href{https://developer.hashicorp.com/terraform/language/backend/s3}{S3 backend}. Từ 10/08/2023, HashiCorp chuyển các bản phát hành mới của sản phẩm sang Business Source License 1.1; người dùng cuối vẫn được dùng, sửa, phân phối cho mục đích thương mại và phi thương mại, trừ trường hợp cung cấp sản phẩm cạnh tranh với HashiCorp (\href{https://www.hashicorp.com/en/blog/hashicorp-adopts-business-source-license}{HashiCorp adopts BSL}, \href{https://www.hashicorp.com/en/license-faq}{Licensing FAQ}).
+  \item \textbf{Nguyên tắc kiến trúc.} \href{https://docs.aws.amazon.com/wellarchitected/latest/analytics-lens/analytics-lens.html}{Well-Architected Data Analytics Lens} gom nguyên tắc theo các trụ cột (vận hành, bảo mật, tin cậy, hiệu năng, chi phí, bền vững) cho hệ thống phân tích; dùng nó làm danh sách rà soát thiết kế. Bản này có trước S3 Tables.
+  \item \textbf{Sao lưu và khôi phục.} Snapshot Iceberg nằm cùng storage và bị expire, nên không thay được bản sao lưu; kết hợp versioning, sao chép sang nơi khác và đặt mục tiêu RPO, RTO (\href{https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-workloads-on-aws.html}{Disaster Recovery of Workloads on AWS}).
+\end{enumerate}
+
+\subsection{Ánh xạ sang Google Cloud}
+\begin{xltabular}{\textwidth}{@{}P{3.6cm} P{4.4cm} L@{}}
+\toprule
+\thd{AWS} & \thd{Google Cloud} & \thd{ghi chú} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+S3 & Cloud Storage & object storage \\
+Glue Data Catalog, Iceberg REST & Lakehouse runtime catalog (trước gọi là BigLake metastore) & từ 20/04/2026, BigLake đổi tên thành Lakehouse; API, thư viện và lệnh \code{gcloud biglake} giữ tên cũ (\href{https://docs.cloud.google.com/lakehouse/docs/release-notes}{Lakehouse release notes}) \\
+Athena & BigQuery & BigQuery sandbox không cần thẻ: 10 GiB lưu trữ, 1 TiB truy vấn mỗi tháng, bảng hết hạn sau 60 ngày (\href{https://cloud.google.com/bigquery/docs/sandbox}{BigQuery sandbox}) \\
+EMR, EMR Serverless & Managed Service for Apache Spark (trước là Dataproc) & \href{https://docs.cloud.google.com/managed-spark/docs}{Managed Service for Apache Spark} \\
+MWAA & Cloud Composer & Airflow có quản lý \\
+\end{xltabular}
+
+\subsection{Chứng chỉ}
+Module này phủ phần dịch vụ cloud của hai chứng chỉ AWS Certified Data Engineer -- Associate và Google Cloud Professional Data Engineer. Chi tiết đề thi và cách các module ánh xạ vào từng mục của exam guide nằm ở chương ``Ánh xạ tới chứng chỉ'' trong Phần V. Với người mới, hãy dùng exam guide làm đề cương học trước, thi sau khi đã có kinh nghiệm thực tế.
+
+\section{Bắt đầu}
+\begin{enumerate}
+  \item Đọc \href{https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/free-tier-plans.html}{Choosing a Free Tier plan} trước khi mở tài khoản.
+  \item Làm \href{https://developer.hashicorp.com/terraform/tutorials/docker-get-started}{Terraform: Get Started - Docker} trên laptop (không tốn tiền cloud), rồi \href{https://developer.hashicorp.com/terraform/tutorials/aws-get-started}{Get Started - AWS}.
+  \item Làm \href{https://docs.aws.amazon.com/athena/latest/ug/getting-started.html}{Athena: Getting started} sau khi đã có budget.
+\end{enumerate}
+
+\section{Tài liệu chính thức}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{1.8cm}@{}}
+\toprule
+\thd{tài liệu} & \thd{nội dung cần đọc} & \thd{thời lượng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/free-tier-plans.html}{AWS Free Tier plans}, \href{https://aws.amazon.com/free/terms}{Terms} & gói Free, gói Paid, thời hạn credit & 0,5 giờ \\
+\href{https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html}{IAM best practices} & MFA, role, credential tạm, quyền tối thiểu & 1,5 giờ \\
+\href{https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html}{AWS Budgets} & budget, ngưỡng cảnh báo, budget action & 0,5 giờ \\
+\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html}{S3 storage classes}, \href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/lifecycle-transition-general-considerations.html}{Lifecycle transitions} & mức tính tối thiểu, mặc định 128 KB, bộ lọc kích thước & 1,5 giờ \\
+\href{https://docs.aws.amazon.com/glue/latest/dg/catalog-and-crawler.html}{Glue Data Catalog}, \href{https://docs.aws.amazon.com/glue/latest/dg/connect-glu-iceberg-rest.html}{Glue Iceberg REST} & database, bảng, crawler; endpoint REST & 1,5 giờ \\
+\href{https://docs.aws.amazon.com/athena/latest/ug/querying-iceberg.html}{Athena: Querying Iceberg}, \href{https://aws.amazon.com/athena/pricing/}{Pricing} & tạo và truy vấn bảng Iceberg; cách tính tiền & 1,5 giờ \\
+\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-tables-integrating-open-source.html}{S3 Tables REST endpoint} & cấu hình và giới hạn & 1 giờ \\
+\href{https://docs.aws.amazon.com/emr/latest/EMR-Serverless-UserGuide/getting-started.html}{EMR Serverless: Getting started} & application, job run & 0,5 giờ \\
+\href{https://docs.aws.amazon.com/prescriptive-guidance/latest/apache-iceberg-on-aws/introduction.html}{Using Apache Iceberg on AWS} & Athena, Glue, EMR, best practices & 2 giờ \\
+\href{https://developer.hashicorp.com/terraform/tutorials/aws-get-started}{Terraform: Get Started - AWS} & chuỗi tutorial cơ bản, state & 2 giờ \\
+\href{https://docs.aws.amazon.com/wellarchitected/latest/analytics-lens/analytics-lens.html}{Data Analytics Lens} & nguyên tắc theo trụ cột, kịch bản batch & 1 giờ \\
+\href{https://docs.aws.amazon.com/aws-certification/latest/data-engineer-associate-01/data-engineer-associate-01.html}{DEA-C01 exam guide}, \href{https://cloud.google.com/learn/certification/data-engineer}{Google PDE} & domain và kỹ năng & 1 giờ \\
+\end{xltabular}
+
+\section{Khoá học miễn phí}
+\begin{itemize}
+  \item \href{https://developer.hashicorp.com/terraform/tutorials/aws-get-started}{HashiCorp tutorials: Get Started - AWS}: miễn phí; chỉ phần tài nguyên AWS tạo ra mới có thể tính tiền.
+  \item \href{https://github.com/DataTalksClub/data-engineering-zoomcamp}{DE Zoomcamp}: module 1 ``Containerization and Infrastructure as Code'' dùng Docker và Terraform trên Google Cloud; miễn phí.
+\end{itemize}
+
+\section{Lab thực hành}
+
+Các lab đi theo thang an toàn chi phí: từ không tốn tiền tới có thể tốn tiền. Mỗi lab trên AWS kết thúc bằng \code{terraform destroy}, và hôm sau bạn mở Billing console kiểm lại.
+
+\subsection{Lab 1: Terraform trên laptop}
+Làm chuỗi Get Started - Docker: tạo một container bằng Terraform, đổi cấu hình, \code{terraform destroy}.
+\hoanthanh{\code{terraform state list} trả rỗng sau \code{destroy}, và \code{docker ps} không còn container của lab.}
+
+\subsection{Lab 2: An toàn tài khoản trước tiên}
+\begin{enumerate}
+  \item Mở tài khoản, chọn gói Free nếu chỉ học; bật MFA cho root, không tạo access key cho root.
+  \item Tạo một danh tính quản trị có MFA cho việc hằng ngày; cấu hình AWS CLI bằng credential tạm thời.
+  \item Tạo budget chi phí hằng tháng nhỏ (ví dụ 5 USD) với email cảnh báo ở 50\%, 80\%, 100\%; bật Cost Anomaly Detection.
+\end{enumerate}
+\hoanthanh{Bạn nhận được email xác nhận đăng ký cảnh báo, và \code{aws sts get-caller-\allowbreak identity} trả danh tính không phải root.}
+
+\subsection{Lab 3: S3, Glue và Athena trên Olist bằng Terraform}
+\begin{enumerate}
+  \item Viết Terraform cho: một bucket có versioning, chặn public access, lifecycle xoá version cũ sau 7 ngày; một Glue database \code{olist}; một Athena workgroup có giới hạn byte quét mỗi câu và vị trí lưu kết quả.
+\end{enumerate}
+\begin{codeblock}
+resource "aws_s3_bucket" "lake" {
+  bucket        = "olist-lake-<suffix>"
+  force_destroy = true   # cho phép destroy cả khi còn object (chỉ dùng cho lab)
+}
+
+resource "aws_glue_catalog_database" "olist" {
+  name = "olist"
+}
+
+resource "aws_athena_workgroup" "lab" {
+  name          = "olist-lab"
+  force_destroy = true
+  configuration {
+    bytes_scanned_cutoff_per_query = 1073741824   # 1 GB
+    result_configuration {
+      output_location = "s3://${aws_s3_bucket.lake.bucket}/athena-results/"
+    }
+  }
+}
+\end{codeblock}
+\begin{enumerate}[resume]
+  \item Tải lên \code{orders} dạng CSV và dạng Parquet (Parquet tạo bằng DuckDB, có thêm bản partition theo năm và tháng mua).
+  \item Khai báo ba bảng trong Glue (bằng DDL của Athena hoặc Terraform) và chạy cùng một câu ``số đơn theo trạng thái trong 2018'' trên cả ba.
+  \item Ghi lại ``Data scanned'' của mỗi câu.
+\end{enumerate}
+\hoanthanh{Bảng ba dòng (CSV, Parquet, Parquet có partition) với byte quét và chi phí ước tính theo 5 USD mỗi TB, tối thiểu 10 MB mỗi câu.}
+
+\subsection{Lab 4: Bảng Iceberg trên AWS, rồi dọn sạch}
+\begin{enumerate}
+  \item Tạo bảng Iceberg \code{olist.\allowbreak orders\_iceberg} bằng Athena (\code{TBLPROPERTIES ('table\_type'=\allowbreak 'ICEBERG')}) và nạp từ bảng Parquet; chạy một \code{UPDATE} hoặc \code{MERGE} rồi xem lịch sử snapshot.
+  \item Từ Spark hoặc PyIceberg trên laptop, nối vào endpoint Iceberg REST của Glue (SigV4, signing name \code{glue}, \code{warehouse} là account ID) và đọc cùng bảng.
+  \item Tuỳ chọn: tạo table bucket S3 Tables, ghi một bảng Olist qua endpoint REST của S3 Tables, đối chiếu với danh sách giới hạn; xoá table bucket khi xong.
+  \item \code{terraform destroy}; xoá tay mọi thứ ngoài state; hôm sau kiểm Billing và Cost Explorer.
+\end{enumerate}
+\hoanthanh{Cùng một bảng Iceberg được đọc từ Athena và từ engine trên laptop; sau \code{destroy}, không còn bucket, database hay workgroup của lab, và Billing không có dịch vụ lạ.}
+
+\section{Kế hoạch theo tuần}
+\begin{xltabular}{\textwidth}{@{}P{1.6cm} L P{1.8cm}@{}}
+\toprule
+\thd{tuần} & \thd{việc} & \thd{giờ} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & Free Tier plans, IAM best practices, Budgets; Terraform Docker và AWS; Lab 1, Lab 2 & 10 \\
+2 & S3 storage classes, lifecycle; Glue Data Catalog; Athena Iceberg và pricing; Lab 3 & 10 \\
+3 & Glue Iceberg REST, S3 Tables, Iceberg on AWS, Analytics Lens; Lab 4; thử thách kỹ năng; \code{terraform destroy} và kiểm Billing & 10 \\
+thêm & EMR Serverless trên cùng bảng; Lake Formation; DR whitepaper; đọc kỹ hai exam guide; Zoomcamp module 1 trên Google Cloud & 10 trở lên \\
+\end{xltabular}
+
+\begin{thuthach}
+Dựng bằng một lệnh \code{terraform apply} một ``lát cloud'' cho Olist: bucket với prefix \code{raw/} và \code{curated/}, một IAM role cho job (chỉ đọc \code{raw/}, đọc và ghi \code{curated/}, không có quyền gì khác), Glue database, Athena workgroup có giới hạn byte quét, và budget có cảnh báo. Chứng minh role không ghi được vào \code{raw/}. Sau đó xoá toàn bộ bằng một lệnh \code{terraform destroy}.
+\hoanthanh{Chạy \code{apply} rồi \code{destroy} hai lần liên tiếp trên tài khoản sạch đều thành công; lệnh ghi vào \code{raw/} bằng role bị từ chối; IAM Access Analyzer policy validation không báo lỗi hay cảnh báo bảo mật.}
+\end{thuthach}
+
+\section{Câu hỏi tự kiểm tra}
+\begin{enumerate}
+  \item Gói Free của AWS kết thúc khi nào, và điều gì xảy ra với dữ liệu khi nó kết thúc?
+  \item Vì sao một budget alert không ngăn được hoá đơn lớn?
+  \item Trust policy và permissions policy của một IAM role khác nhau thế nào?
+  \item Vì sao job chạy trên AWS nên dùng role thay vì access key lâu dài?
+  \item Vì sao lifecycle rule chuyển file Parquet 50 KB sang Standard-IA mặc định không làm gì, và ép chuyển thì có lợi không?
+  \item Athena tính tiền một câu truy vấn thế nào? Kể ba cách giảm byte quét trên bảng orders.
+  \item Endpoint Iceberg REST của Glue và của S3 Tables khác nhau ở điểm nào (warehouse, signing name, giới hạn)?
+  \item Vì sao \code{CREATE TABLE AS SELECT} không chạy qua endpoint REST của S3 Tables?
+  \item Cấu hình nào ngăn một Glue job thử chạy lâu và tốn nhiều DPU?
+  \item \code{terraform destroy} xoá gì và không xoá gì?
+  \item Vì sao snapshot Iceberg không phải bản sao lưu?
+  \item Dịch vụ Google Cloud nào tương ứng với Glue Data Catalog, Athena và EMR?
+\end{enumerate}
+
+\section{Điểm dễ nhầm}
+\begin{xltabular}{\textwidth}{@{}P{4.0cm} L P{3.2cm}@{}}
+\toprule
+\thd{điểm dễ nhầm} & \thd{thực tế} & \thd{docs chính thức} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Nhiều người nghĩ Free Tier là ``12 tháng miễn phí'' & Tài khoản mới chọn gói Free (tối đa 6 tháng, dùng credit) hoặc gói Paid; credit hết hạn sau 12 tháng & \href{https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/free-tier-plans.html}{Free Tier plans}, \href{https://aws.amazon.com/free/terms}{Terms} \\
+Budget alert dừng việc tiêu tiền & Nó chỉ báo, trừ khi cấu hình budget action & \href{https://aws.amazon.com/aws-cost-management/aws-budgets/pricing/}{Budgets pricing} \\
+Infrequent Access luôn rẻ hơn & Không với object nhỏ hay sống ngắn: tính tối thiểu 128 KB và 30 ngày; lifecycle mặc định không chuyển object dưới 128 KB & \href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/storage-class-intro.html}{S3 storage classes}, \href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/lifecycle-transition-general-considerations.html}{Lifecycle} \\
+Athena miễn phí khi câu trả ít dòng & Tính theo byte quét, tối thiểu 10 MB; chỉ câu lỗi và DDL không tính & \href{https://aws.amazon.com/athena/pricing/}{Athena pricing} \\
+Endpoint REST của S3 Tables chạy mọi câu lệnh Iceberg & Không có \code{stage-create}, view API, namespace nhiều cấp; \code{DROP TABLE} cần \code{PURGE} & \href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-tables-integrating-open-source.html}{S3 Tables REST} \\
+Xoá EC2 là hết chi phí mạng & NAT gateway tính theo giờ tới khi bị xoá; public IPv4 cũng tính theo giờ & \href{https://aws.amazon.com/vpc/pricing/}{VPC pricing} \\
+\code{terraform destroy} xoá mọi thứ & Chỉ xoá tài nguyên có trong state & \href{https://developer.hashicorp.com/terraform/tutorials/aws-get-started}{Terraform AWS} \\
+DEA-C01 có 65 câu tính điểm & 50 câu tính điểm, 15 câu không tính điểm và không được đánh dấu & \href{https://docs.aws.amazon.com/aws-certification/latest/data-engineer-associate-01/data-engineer-associate-01.html}{DEA-C01 exam guide} \\
+\end{xltabular}

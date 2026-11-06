@@ -1,0 +1,750 @@
+% !TEX program = xelatex
+% =====================================================================
+%  Lộ trình Data Engineer: xây và vận hành lakehouse mã nguồn mở
+%  Phiên bản 1.0, cập nhật 02/11/2026
+%  Biên dịch bằng XeLaTeX (chạy 2 lần để có mục lục).
+%  Overleaf: Menu > Settings > Compiler = XeLaTeX.
+% =====================================================================
+% Biên dịch: xelatex main.tex (chạy 2 lần để có mục lục)
+\documentclass[11pt,a4paper,oneside]{report}
+
+% ---------- Font và ngôn ngữ ----------
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setdefaultlanguage{vietnamese}
+\setotherlanguage{english}
+% Nạp font theo tên file: Tectonic chỉ thấy font trong cây TeX theo tên file, TeX Live cũng tìm được
+\setmainfont{texgyrepagella}[Extension=.otf,UprightFont=*-regular,BoldFont=*-bold,ItalicFont=*-italic,BoldItalicFont=*-bolditalic]
+\setsansfont{texgyreheros}[Extension=.otf,UprightFont=*-regular,BoldFont=*-bold,ItalicFont=*-italic,BoldItalicFont=*-bolditalic]
+% Font mono phải có đủ dấu tiếng Việt (DejaVu Sans Mono thiếu ổ, ỗ...)
+\IfFontExistsTF{NotoSansMono-Regular.ttf}{\setmonofont{NotoSansMono}[Extension=.ttf,UprightFont=*-Regular,BoldFont=*-Bold,Scale=0.86]}{%
+  \IfFontExistsTF{Liberation Mono}{\setmonofont{Liberation Mono}[Scale=0.9]}{%
+    \setmonofont{texgyrecursor}[Extension=.otf,UprightFont=*-regular,BoldFont=*-bold,ItalicFont=*-italic,BoldItalicFont=*-bolditalic,Scale=1.0]}}
+
+% ---------- Bố cục ----------
+\usepackage[a4paper,top=2.2cm,bottom=2.4cm,left=2.3cm,right=2.3cm,headheight=14pt]{geometry}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{array,booktabs,xltabular,multirow}
+\usepackage{enumitem}
+\usepackage{fvextra}
+\usepackage[most]{tcolorbox}
+\usepackage[nobottomtitles*]{titlesec}
+\renewcommand{\bottomtitlespace}{0.12\textheight}
+\usepackage{fancyhdr}
+\usepackage{etoolbox}
+\usepackage[colorlinks=true,linkcolor=linkblue,urlcolor=linkblue,citecolor=linkblue,
+            pdftitle={Lộ trình Data Engineer: xây lakehouse mã nguồn mở}]{hyperref}
+\usepackage{bookmark}
+
+% ---------- Màu ----------
+\definecolor{linkblue}{HTML}{1F5FAD}
+\definecolor{ink}{HTML}{1E2329}
+\definecolor{muted}{HTML}{5B636E}
+\definecolor{accent}{HTML}{0F6E56}
+\definecolor{accentbg}{HTML}{EAF5F0}
+\definecolor{warnline}{HTML}{B5651D}
+\definecolor{warnbg}{HTML}{FBF2E8}
+\definecolor{infoline}{HTML}{1F5FAD}
+\definecolor{infobg}{HTML}{EEF4FB}
+\definecolor{rulegray}{HTML}{C9CED6}
+\definecolor{codebg}{HTML}{F5F6F8}
+
+\color{ink}
+\setlength{\parindent}{0pt}
+\setlength{\emergencystretch}{3em}
+\setlength{\parskip}{0.55em}
+\linespread{1.08}
+\setlist{itemsep=0.15em,topsep=0.3em,parsep=0.1em}
+
+% ---------- Tiêu đề chương, mục ----------
+\titleformat{\chapter}[display]
+  {\sffamily\bfseries\color{ink}}
+  {\large\color{accent}\MakeUppercase{\chaptertitlename}\ \thechapter}
+  {0.3em}{\LARGE}
+\titlespacing*{\chapter}{0pt}{-1.2em}{1.2em}
+\titleformat{\section}{\sffamily\bfseries\large\color{ink}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\sffamily\bfseries\normalsize\color{ink}}{\thesubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.3em}{0.4em}
+\titlespacing*{\subsection}{0pt}{1.0em}{0.3em}
+\setcounter{secnumdepth}{0}
+\setcounter{tocdepth}{0}
+\usepackage{tocloft}
+\setlength{\cftbeforechapskip}{0.5em}
+\renewcommand{\cfttoctitlefont}{\sffamily\bfseries\LARGE}
+\renewcommand{\cftchapfont}{\sffamily\bfseries\small}
+\renewcommand{\cftchappagefont}{\sffamily\bfseries\small}
+
+% Chương không thuộc chặng (mở đầu, phụ lục): \plainchapter{tên}
+\newcommand{\plainchapter}[1]{%
+  \clearpage\phantomsection
+  \addcontentsline{toc}{chapter}{#1}%
+  \markboth{#1}{}%
+  \thispagestyle{plain}%
+  {\sffamily\bfseries\LARGE\color{ink}#1\par}\vspace{1.0em}}
+
+% ---------- Header, footer ----------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\sffamily\color{muted}\leftmark}
+\fancyhead[R]{\small\sffamily\color{muted}Lộ trình Data Engineer}
+\fancyfoot[C]{\small\sffamily\color{muted}\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\chaptermark}[1]{\markboth{#1}{}}
+\fancypagestyle{plain}{\fancyhf{}\fancyfoot[C]{\small\sffamily\color{muted}\thepage}\renewcommand{\headrulewidth}{0pt}}
+
+% ---------- Bảng ----------
+% Cột X căn trái, không giãn chữ; P{w}: cột rộng cố định căn trái
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcommand{\thd}[1]{\textbf{\sffamily\small #1}}
+\setlength{\tabcolsep}{4.5pt}
+\renewcommand{\arraystretch}{1.18}
+\AtBeginEnvironment{xltabular}{\small}
+\keepXColumns
+
+% ---------- Mã, đường dẫn ----------
+% \code{...}: mã ngắn trong dòng. Thoát tay: \_ \% \# \& \$ \{ \} \textbackslash{} \textasciitilde{}
+\newcommand{\code}[1]{\texttt{#1}}
+% \repo{...}: file hoặc lệnh trong repo lakehouse/ của bạn
+\newcommand{\repo}[1]{\texttt{\color{accent}#1}}
+\DefineVerbatimEnvironment{codeblock}{Verbatim}{%
+  fontsize=\small,breaklines=true,breakanywhere=true,
+  frame=leftline,framerule=2pt,rulecolor=\color{rulegray},
+  xleftmargin=0.8em,framesep=0.8em}
+
+% ---------- Hộp ----------
+\newtcolorbox{luuy}[1][]{enhanced,breakable,colback=warnbg,colframe=warnline,
+  boxrule=0pt,leftrule=3pt,arc=0pt,outer arc=0pt,left=8pt,right=8pt,top=6pt,bottom=6pt,#1}
+\newtcolorbox{ghichu}[1][]{enhanced,breakable,colback=infobg,colframe=infoline,
+  boxrule=0pt,leftrule=3pt,arc=0pt,outer arc=0pt,left=8pt,right=8pt,top=6pt,bottom=6pt,#1}
+
+
+% ---------- Phần (Part) ----------
+% \partpage{I}{Nền tảng}{mô tả ngắn}
+\newcommand{\partpage}[3]{%
+  \clearpage\phantomsection
+  \addcontentsline{toc}{part}{Phần #1\quad #2}%
+  \thispagestyle{empty}%
+  \vspace*{5cm}
+  {\sffamily\bfseries\large\color{accent}PHẦN #1\par}\vspace{0.5em}
+  {\sffamily\bfseries\Huge\color{ink}#2\par}\vspace{1em}
+  {\color{accent}\rule{0.35\linewidth}{1.2pt}}\par\vspace{1em}
+  \begin{minipage}{0.8\linewidth}\large\color{muted}#3\end{minipage}
+  \clearpage}
+
+% ---------- Module ----------
+% \modulechapter{5}{Open table format: Apache Iceberg}
+\newcommand{\modulechapter}[2]{%
+  \clearpage\phantomsection
+  \addcontentsline{toc}{chapter}{Module #1\quad #2}%
+  \markboth{Module #1: #2}{}%
+  \thispagestyle{plain}%
+  {\sffamily\bfseries\large\color{accent}MODULE #1\par}\vspace{0.35em}%
+  {\sffamily\bfseries\LARGE\color{ink}#2\par}\vspace{1.0em}%
+  \label{module:#1}}
+% \moduleinfo{cấp độ}{thời lượng}{tiên quyết}
+\newcommand{\moduleinfo}[3]{%
+  \begin{tcolorbox}[enhanced,colback=codebg,colframe=codebg,arc=0pt,boxrule=0pt,
+     left=8pt,right=8pt,top=4pt,bottom=4pt,fontupper=\small\sffamily]
+  \textbf{Cấp độ:} #1 \quad\textbar\quad \textbf{Thời lượng:} #2 \quad\textbar\quad \textbf{Tiên quyết:} #3
+  \end{tcolorbox}}
+
+% Hộp "Thử thách kỹ năng" (giống skill badge challenge lab)
+\newtcolorbox{thuthach}[1][]{enhanced,breakable,colback=accentbg,colframe=accent,
+  boxrule=0pt,leftrule=3pt,arc=0pt,outer arc=0pt,left=8pt,right=8pt,top=6pt,bottom=6pt,
+  fonttitle=\sffamily\bfseries\small,coltitle=accent,colbacktitle=accentbg,
+  title={Thử thách kỹ năng},attach title to upper={\par\smallskip},#1}
+% Hộp "Hoàn thành khi"
+\newcommand{\hoanthanh}[1]{\par\smallskip\textbf{\sffamily\small\color{accent}Hoàn thành khi:} #1\par}
+
+\renewcommand{\cftpartfont}{\sffamily\bfseries\normalsize\color{accent}}
+\renewcommand{\cftpartpagefont}{\sffamily\bfseries\normalsize\color{accent}}
+\setlength{\cftbeforepartskip}{1.0em}
+
+
+\begin{document}
+
+\begin{titlepage}
+\thispagestyle{empty}
+\vspace*{3.5cm}
+{\sffamily\bfseries\color{accent}\large LỘ TRÌNH HỌC THEO VAI TRÒ\par}
+\vspace{0.6em}
+{\sffamily\bfseries\Huge\color{ink} Data Engineer\par}
+\vspace{0.3em}
+{\sffamily\bfseries\LARGE\color{ink} Xây và vận hành lakehouse mã nguồn mở\par}
+\vspace{0.6em}
+{\sffamily\large\color{muted} Từ SQL tới production: Iceberg, Spark, Airflow, Trino, Kafka, AWS\par}
+\vspace{2.2em}
+{\color{accent}\rule{\linewidth}{1.2pt}}\par
+\vspace{1.2em}
+\begin{minipage}{0.88\linewidth}
+\large
+\textbf{5 phần \textbar{} 13 module \textbar{} 1 dự án capstone \textbar{} khoảng 315 giờ}\par\medskip
+Mỗi module gồm mục tiêu học, tài liệu chính thức, khoá học miễn phí, lab thực hành trên bộ dữ liệu công khai Olist và một bài thử thách kỹ năng. Kiến thức và phiên bản phần mềm được đối chiếu với tài liệu chính thức của từng dự án.
+\end{minipage}
+\vfill
+{\sffamily\color{muted}Phiên bản 1.0 \textbar{} cập nhật 02/11/2026\par}
+\end{titlepage}
+
+\tableofcontents
+\clearpage
+
+% ---------------- front ----------------
+% ====================== PHẦN MỞ ĐẦU ======================
+\plainchapter{Về lộ trình này}
+
+Lộ trình này đưa bạn từ SQL tới việc tự xây và vận hành một \textbf{lakehouse mã nguồn mở}: dữ liệu nằm trên object storage, được tổ chức thành bảng Apache Iceberg, quản lý bằng một REST catalog, xử lý bằng Spark, điều phối bằng Airflow, kiểm tra chất lượng trước khi phục vụ qua Trino và BI, rồi đưa lên cloud.
+
+Cách trình bày theo mô hình của các lộ trình học chính thức. Giống \href{https://www.skills.google/paths/16}{learning path Professional Data Engineer của Google Cloud}, lộ trình đi theo vai trò công việc, gồm nội dung học, lab thực hành và một bài thử thách cuối mỗi phần để chứng minh kỹ năng, rồi ánh xạ sang chứng chỉ. Giống \href{https://www.anthropic.com/learn/build-with-claude}{trang học của Anthropic}, mỗi chủ đề mở đầu bằng mục ``Bắt đầu'', tiếp theo là tài liệu chính thức, khoá học và bài thực hành.
+
+\section{Dành cho ai}
+\begin{itemize}
+  \item Sinh viên công nghệ thông tin và kỹ sư phần mềm muốn chuyển sang data engineering.
+  \item Data analyst muốn tự xây pipeline thay vì chỉ dùng dữ liệu có sẵn.
+  \item Kỹ sư dữ liệu đã quen warehouse truyền thống, muốn hiểu lakehouse và open table format từ bên trong.
+\end{itemize}
+Bạn cần biết lập trình Python ở mức cơ bản, dùng được dòng lệnh và Docker. Không cần biết trước SQL: Module 1 bắt đầu từ đầu.
+
+\section{Học xong bạn làm được gì}
+\begin{itemize}
+  \item Viết SQL phân tích nhiều bảng và thiết kế mô hình dữ liệu dạng star schema đúng grain.
+  \item Giải thích một bảng Iceberg được tạo thành từ những file nào, một lần commit diễn ra thế nào, và vì sao catalog là nơi duy nhất giữ trạng thái.
+  \item Xây pipeline tăng dần, chạy lại không sinh trùng, có test chặn dữ liệu sai trước khi tới tầng phục vụ.
+  \item Điều phối pipeline bằng Airflow 3, phục vụ dữ liệu qua Trino và dashboard, thêm một nhánh streaming với Kafka và Flink.
+  \item Đưa lakehouse lên AWS bằng Terraform với giới hạn chi phí, và đối chiếu được với các dịch vụ tương đương trên Google Cloud.
+\end{itemize}
+
+\section{Cách tổ chức}
+Lộ trình có \textbf{5 phần, 13 module và 1 dự án capstone}, tổng khoảng \textbf{315 giờ lõi}. Với 10 giờ mỗi tuần, bạn cần khoảng 8 tháng, cộng thời gian ôn tập thì thành 8 tới 9 tháng. Mỗi module có cùng một khung:
+
+\begin{xltabular}{\textwidth}{@{}P{3.6cm} L@{}}
+\toprule
+\thd{mục} & \thd{vai trò} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Bạn sẽ học được & mục tiêu học, mỗi mục là một việc bạn làm được sau module \\
+Nội dung chính & các khái niệm theo thứ tự học, mỗi khái niệm dẫn tới docs chính thức \\
+Bắt đầu & một tới ba tutorial hoặc quickstart chính thức để làm ngay buổi đầu \\
+Tài liệu chính thức & docs, spec, hướng dẫn của dự án hoặc nhà cung cấp, kèm thời lượng ước tính \\
+Khoá học miễn phí & khoá học chính thức hoặc khoá đại học công khai, ghi rõ phần nào miễn phí \\
+Lab thực hành & bài làm từng bước trên stack tham chiếu và dữ liệu Olist, mỗi lab có điều kiện ``hoàn thành khi'' \\
+Kế hoạch theo tuần & cách chia thời lượng của module theo tuần \\
+Thử thách kỹ năng & một bài không có hướng dẫn từng bước, giống challenge lab của skill badge \\
+Câu hỏi tự kiểm tra & câu hỏi bám theo mục tiêu học \\
+Điểm dễ nhầm & những hiểu lầm phổ biến, mỗi dòng dẫn tới docs chính thức \\
+\end{xltabular}
+
+\section{Chọn điểm bắt đầu}
+Không phải ai cũng cần học theo đúng thứ tự từ Module 1. Hãy chọn lối vào hợp với bạn, giống cách các học viện của nhà cung cấp chia track theo người học.
+
+\begin{xltabular}{\textwidth}{@{}P{3.4cm} L L@{}}
+\toprule
+\thd{bạn là} & \thd{bắt đầu ở} & \thd{ghi chú} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Mới với dữ liệu & Module 1, đi theo thứ tự & giữ đủ thời lượng của Module 1 và 3, đó là nền cho mọi phần sau \\
+Đã vững SQL & làm thử thách kỹ năng của Module 1; đạt thì sang Module 2 và 3 & phần lớn thời gian nên dồn vào Phần II \\
+Kỹ sư backend hoặc cloud & Module 1 và 3 dạng kiểm tra nhanh, rồi Module 4 tới 6 & bạn đã quen Docker, Git, CI, nên Module 10 và 13 có thể đi nhanh \\
+Đã quen warehouse & Module 4 tới 6 trước, rồi quay lại Module 7 & đọc kỹ phần catalog và commit, đó là chỗ lakehouse khác warehouse nhiều nhất \\
+\end{xltabular}
+
+\section{Nguyên tắc về nguồn}
+\begin{itemize}
+  \item Mọi khẳng định kỹ thuật dẫn tới \textbf{tài liệu chính thức}: docs, spec, release notes của dự án, hướng dẫn của nhà cung cấp cloud, trang của chương trình chứng chỉ. Sách là tài liệu đọc thêm, liệt kê ở phụ lục.
+  \item Phiên bản phần mềm và thông tin chứng chỉ được kiểm ngày \textbf{02/11/2026}. Phần mềm thay đổi nhanh: hãy ghim phiên bản trong môi trường học và luôn mở bộ docs đúng phiên bản bạn chạy, không mặc định mở bản \code{latest}.
+  \item Thời lượng là ước tính cho phần lõi. Mỗi module có phần ``thêm'' để bạn quay lại khi còn thời gian.
+\end{itemize}
+
+% ====================== BẢN ĐỒ ======================
+\plainchapter{Bản đồ lộ trình}
+
+Thứ tự đi từ nền tảng tới vận hành: học cách hỏi dữ liệu và mô hình hoá trước, rồi hiểu dữ liệu được lưu thế nào, sau đó mới xây pipeline, cuối cùng là phục vụ, streaming và cloud. Dự án capstone chạy xuyên suốt, mỗi phần thêm một mốc.
+
+\begin{codeblock}
+PHẦN I    Nền tảng
+            M1  SQL và mô hình quan hệ
+            M2  Vòng đời DE và kiến trúc dữ liệu
+            M3  Mô hình dữ liệu cho phân tích
+            ─► Mốc capstone 1: star schema cho Olist
+   │
+PHẦN II   Lưu trữ và lakehouse
+            M4  Lưu trữ và định dạng file
+            M5  Open table format: Apache Iceberg
+            M6  Catalog, metadata và governance
+            ─► Mốc capstone 2: raw và staging trên Iceberg
+   │
+PHẦN III  Xử lý và vận hành pipeline
+            M7  Apache Spark
+            M8  Ingestion và pattern pipeline
+            M9  Orchestration với Airflow
+            M10 Chất lượng dữ liệu, test và DataOps
+            ─► Mốc capstone 3: pipeline tăng dần có test
+   │
+PHẦN IV   Phục vụ, streaming và cloud
+            M11 Phục vụ dữ liệu: Trino và BI
+            M12 Streaming: Kafka và Flink
+            M13 Cloud và vận hành production
+            ─► Mốc capstone 4: dashboard và bản trên cloud
+   │
+PHẦN V    Capstone, chứng chỉ và nghề nghiệp
+\end{codeblock}
+
+\section{Các module}
+\begin{xltabular}{\textwidth}{@{}l L P{2.6cm} r P{2.4cm}@{}}
+\toprule
+\thd{module} & \thd{tên} & \thd{cấp độ} & \thd{giờ} & \thd{tiên quyết} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & SQL và mô hình quan hệ & cơ bản & 35 & không \\
+2 & Vòng đời Data Engineering và kiến trúc dữ liệu & cơ bản & 15 & 1 \\
+3 & Mô hình dữ liệu cho phân tích & cơ bản tới trung cấp & 30 & 1 \\
+4 & Lưu trữ và định dạng file & trung cấp & 20 & 1, 2 \\
+5 & Open table format: Apache Iceberg & trung cấp tới nâng cao & 35 & 4 \\
+6 & Catalog, metadata và governance & trung cấp & 15 & 5 \\
+7 & Apache Spark và tính toán phân tán & trung cấp & 30 & 1, 5 \\
+8 & Ingestion và các pattern pipeline & trung cấp & 20 & 5, 7 \\
+9 & Orchestration với Apache Airflow & trung cấp & 20 & 8 \\
+10 & Chất lượng dữ liệu, test và DataOps & trung cấp & 20 & 8, 9 \\
+11 & Phục vụ dữ liệu: Trino và BI & trung cấp & 15 & 3, 5, 6 \\
+12 & Streaming: Kafka và Flink & nâng cao & 30 & 5, 7, 8 \\
+13 & Cloud và vận hành production & nâng cao & 30 & 5, 6, 9 \\
+\midrule
+ & \textbf{tổng} & & \textbf{315} & \\
+\end{xltabular}
+
+\section{Lịch gợi ý theo tháng}
+Lịch tính cho 10 giờ mỗi tuần, khoảng 40 giờ mỗi tháng.
+
+\begin{xltabular}{\textwidth}{@{}l P{2.4cm} r L@{}}
+\toprule
+\thd{tháng} & \thd{module} & \thd{giờ} & \thd{mốc capstone} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & 1 & 35 & dựng PostgreSQL và DuckDB, nạp CSV Olist \\
+2 & 2, 3 & 45 & mốc 1: thiết kế star schema \\
+3 & 4, 5 & 55 & bảng raw trên Iceberg; tuần cuối của Module 5 có thể tràn sang tháng 4 \\
+4 & 6, 7 & 45 & mốc 2: staging trên Iceberg, phân quyền trên catalog \\
+5 & 8, 9 & 40 & pipeline tăng dần chạy bằng Airflow \\
+6 & 10, 11 & 35 & mốc 3: test chặn tầng marts; Trino và dashboard \\
+7 & 12 & 30 & nhánh streaming cho sự kiện đơn hàng \\
+8, 9 & 13 và hoàn thiện & 30 cộng ôn tập & mốc 4: bản trên AWS, README, runbook, ôn chứng chỉ \\
+\end{xltabular}
+
+\begin{ghichu}
+\textbf{Thói quen mỗi tuần.} Một buổi đọc docs, hai buổi làm lab, một buổi viết lại bằng lời của bạn những gì vừa học. Ghi từ mới vào một file thuật ngữ riêng. Cuối mỗi module, làm thử thách kỹ năng mà không mở tài liệu.
+\end{ghichu}
+
+% ====================== STACK THAM CHIẾU ======================
+\plainchapter{Stack tham chiếu và dữ liệu}
+
+Mọi lab chạy trên một stack mã nguồn mở dựng bằng Docker Compose trên laptop. Bạn không tốn tiền cloud cho tới Module 13.
+
+\section{Thành phần}
+Cột ``bản mới nhất'' là bản đã kiểm ngày 02/11/2026. Bạn không cần dùng bản mới nhất; điều quan trọng là ghim một phiên bản và đọc docs của đúng phiên bản đó.
+
+\begin{xltabular}{\textwidth}{@{}P{2.7cm} L P{3.8cm}@{}}
+\toprule
+\thd{thành phần} & \thd{vai trò trong stack} & \thd{bản mới nhất, docs} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+RustFS & object storage tương thích S3, chứa mọi file dữ liệu và metadata; quickstart của Apache Polaris và bộ test S3 của PyIceberg đều dùng RustFS & \href{https://docs.rustfs.com/}{docs.rustfs.com} \\
+Apache Iceberg & open table format: biến các file Parquet thành bảng có giao dịch, time travel, schema evolution & 1.12.0, \href{https://iceberg.apache.org/releases/}{releases}, \href{https://iceberg.apache.org/spec/}{spec} \\
+Apache Polaris hoặc Lakekeeper & Iceberg REST catalog: giữ con trỏ tới metadata hiện hành của từng bảng, phân quyền, cấp credential & Polaris 1.8.0, \href{https://polaris.apache.org/downloads/}{downloads}; \href{https://docs.lakekeeper.io/}{Lakekeeper docs} \\
+Apache Spark & engine xử lý batch, chạy MERGE và các procedure bảo trì Iceberg & 4.3.0; nhánh 3.5 mới nhất là 3.5.9, \href{https://spark.apache.org/news/index.html}{Spark news} \\
+PyIceberg & thư viện Python đọc, ghi bảng Iceberg không cần JVM & 0.12.0, \href{https://py.iceberg.apache.org/}{py.iceberg.apache.org} \\
+DuckDB & SQL phân tích trên laptop, đọc Parquet và Iceberg & 2.0.0 LTS, \href{https://duckdb.org/2026/10/21/announcing-duckdb-200}{thông báo 2.0} \\
+PostgreSQL & học SQL và hành vi OLTP: ràng buộc, transaction, index & 18, \href{https://www.postgresql.org/docs/current/}{docs current} \\
+Apache Airflow & điều phối pipeline & 3.3.2, \href{https://airflow.apache.org/docs/apache-airflow/stable/release_notes.html}{release notes} \\
+Trino & engine truy vấn tương tác, phục vụ BI & 484, \href{https://trino.io/docs/current/release.html}{release notes} \\
+Metabase & dashboard trên dữ liệu tầng marts & \href{https://www.metabase.com/docs/latest/}{Metabase docs} \\
+Apache Kafka & log sự kiện cho nhánh streaming & 4.4.0, \href{https://kafka.apache.org/community/downloads/}{downloads} \\
+Apache Flink & xử lý stream có trạng thái, ghi vào Iceberg & 2.3, \href{https://nightlies.apache.org/flink/flink-docs-stable/}{docs stable} \\
+Apache Arrow (pyarrow) & đọc, ghi Parquet trong Python, định dạng bộ nhớ dùng chung & 26.0.0, \href{https://arrow.apache.org/release/}{releases} \\
+\end{xltabular}
+
+\begin{luuy}
+\textbf{Cổng hay bị trùng.} REST catalog thường dùng 8181; object storage dùng 9000 cho API và 9001 cho console; Spark UI dùng 4040; Spark Connect dùng 15002; Metabase, Grafana và giao diện Marquez đều mặc định dùng 3000. Khi gộp nhiều quickstart vào một máy, hãy đổi cổng ngay trong file compose.
+\end{luuy}
+
+\section{Dữ liệu: Olist}
+Mọi lab và dự án capstone dùng \href{https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce}{Brazilian E-Commerce Public Dataset by Olist} trên Kaggle: khoảng 100 nghìn đơn hàng ẩn danh từ 2016 tới 2018 của một sàn thương mại điện tử Brazil, chia thành nhiều file CSV liên kết với nhau.
+
+\begin{xltabular}{\textwidth}{@{}P{4.6cm} L@{}}
+\toprule
+\thd{bảng} & \thd{dùng để học} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\code{orders} & trạng thái đơn và các mốc thời gian; nguồn cho tải tăng dần theo thời điểm mua \\
+\code{order\_items} & mỗi dòng một sản phẩm trong đơn; grain của bảng fact chính \\
+\code{order\_payments} & nhiều dòng thanh toán cho một đơn; khoá gồm hai cột \\
+\code{order\_reviews} & đánh giá; có bản trùng, hợp để luyện bỏ trùng \\
+\code{customers} & phân biệt \code{customer\_id} theo đơn và \code{customer\_unique\_id} theo người \\
+\code{sellers}, \code{products} & bảng chiều; luyện SCD và chuẩn hoá \\
+\code{geolocation} & toạ độ theo mã bưu chính; nhiều dòng trùng, hợp để luyện chất lượng dữ liệu \\
+\end{xltabular}
+Đọc giấy phép trên trang dataset trước khi công khai lại dữ liệu hoặc dùng cho mục đích thương mại.
+
+\section{Tổ chức tầng dữ liệu}
+Lộ trình dùng kiến trúc nhiều tầng theo kiểu medallion, một quy ước thiết kế chứ không phải tính năng của phần mềm nào (\href{https://docs.databricks.com/aws/en/lakehouse/medallion}{Databricks: medallion architecture}).
+
+\begin{codeblock}
+nguồn CSV / sự kiện Kafka
+      │  ingestion (Module 8, 12)
+      ▼
+raw       (bronze)  dữ liệu nguyên trạng, chỉ thêm, có cột metadata nạp
+      │  ép kiểu, bỏ trùng, MERGE theo khoá (Module 7, 8)
+      ▼
+staging / core (silver)  sạch, đúng grain, có test (Module 10)
+      │  mô hình hoá, tổng hợp (Module 3)
+      ▼
+marts     (gold)   star schema và bảng tổng hợp cho BI (Module 11)
+
+Xuyên suốt: Parquet trên RustFS · bảng Iceberg · REST catalog · Airflow điều phối
+\end{codeblock}
+
+
+\partpage{I}{Nền tảng}{Hỏi dữ liệu bằng SQL, hiểu vòng đời và kiến trúc dữ liệu, thiết kế mô hình cho phân tích. Kết thúc bằng mốc capstone 1: star schema cho Olist.}
+% ---------------- m01_03 ----------------
+% Module 1, 2, 3 của "Lộ trình Data Engineer: xây lakehouse mã nguồn mở"
+% =====================================================================
+\input{modules/m01_sql}
+
+% =====================================================================
+\input{modules/m02_vong_doi}
+
+% =====================================================================
+\input{modules/m03_mo_hinh_du_lieu}
+
+
+\partpage{II}{Lưu trữ và lakehouse}{Object storage, định dạng file cột, Apache Iceberg từ bên trong, catalog và quản trị dữ liệu. Kết thúc bằng mốc capstone 2: tầng raw và staging trên Iceberg.}
+% ---------------- m04_06 ----------------
+% ===================================================================
+% Module 4, 5, 6
+% ===================================================================
+
+\input{modules/m04_luu_tru}
+
+% ===================================================================
+
+\input{modules/m05_iceberg}
+
+% ===================================================================
+
+\input{modules/m06_catalog}
+
+
+\partpage{III}{Xử lý và vận hành pipeline}{Spark, các pattern nạp dữ liệu tăng dần, điều phối bằng Airflow, test và DataOps. Kết thúc bằng mốc capstone 3: pipeline tăng dần có test chặn.}
+% ---------------- m07_10 ----------------
+% ============================================================
+% Module 7, 8, 9, 10
+% ============================================================
+
+\input{modules/m07_spark}
+
+% ============================================================
+
+\input{modules/m08_ingestion}
+
+% ============================================================
+
+\input{modules/m09_airflow}
+
+% ============================================================
+
+\input{modules/m10_chat_luong}
+
+
+\partpage{IV}{Phục vụ, streaming và cloud}{Trino và BI, xử lý stream với Kafka và Flink, đưa lakehouse lên cloud với chi phí kiểm soát được. Kết thúc bằng mốc capstone 4: dashboard và bản trên AWS.}
+% ---------------- m11_13 ----------------
+% ============================================================
+% Module 11, 12, 13 và chương Nghề nghiệp
+% ============================================================
+
+% ==================================================================
+\input{modules/m11_phuc_vu}
+
+% ==================================================================
+\input{modules/m12_streaming}
+
+% ==================================================================
+\input{modules/m13_cloud}
+
+% ==================================================================
+
+
+\partpage{V}{Capstone, chứng chỉ và nghề nghiệp}{Gom mọi module thành một dự án portfolio, ánh xạ sang chứng chỉ của AWS và Google Cloud, chuẩn bị đi làm.}
+% ---------------- capstone ----------------
+% ====================== CAPSTONE ======================
+\plainchapter{Dự án capstone: lakehouse cho Olist}
+
+Dự án capstone gom mọi module thành một hệ thống chạy thật, có thể đưa vào portfolio. Bạn xây nó dần qua bốn mốc, mỗi mốc ứng với một phần của lộ trình, giống cách learning path chính thức kết thúc từng chặng bằng một skill badge.
+
+\section{Mục tiêu sản phẩm}
+Một lakehouse cho dữ liệu Olist mà người khác clone về là chạy được bằng một lệnh, gồm:
+\begin{itemize}
+  \item tầng \code{raw}, \code{staging}, \code{core}, \code{marts} là các bảng Iceberg trên object storage, quản lý bằng một REST catalog;
+  \item pipeline tăng dần, chạy lại cho cùng một kết quả, điều phối bằng Airflow;
+  \item test dữ liệu chặn tầng \code{marts} khi \code{core} sai;
+  \item dashboard trên Trino và Metabase trả lời được các câu hỏi nghiệp vụ;
+  \item tài liệu đủ để người khác vận hành: README, sơ đồ kiến trúc, runbook.
+\end{itemize}
+
+\section{Bốn mốc}
+
+\subsection{Mốc 1: mô hình dữ liệu (sau Phần I)}
+\begin{itemize}
+  \item Viết 5 câu hỏi nghiệp vụ, ví dụ doanh thu theo tháng và bang, thời gian giao hàng so với dự kiến, điểm đánh giá theo danh mục sản phẩm.
+  \item Thiết kế star schema trả lời các câu đó: ghi rõ grain của từng bảng fact, khoá của từng bảng chiều, cách xử lý \code{customer\_unique\_id}.
+  \item Viết truy vấn SQL kiểm grain trên CSV gốc bằng DuckDB.
+\end{itemize}
+\hoanthanh{mỗi bảng có một câu mô tả grain, và truy vấn kiểm khoá trả về 0 dòng trùng.}
+
+\subsection{Mốc 2: raw và staging trên Iceberg (sau Phần II)}
+\begin{itemize}
+  \item Dựng stack tham chiếu bằng Docker Compose; tạo namespace \code{raw}, \code{staging}, \code{core}, \code{marts}.
+  \item Nạp CSV vào \code{raw} dạng chỉ thêm, có cột thời điểm nạp và tên file nguồn.
+  \item Viết bảng \code{staging} đã ép kiểu, chọn partition và sort order có lý do.
+  \item Tạo hai principal trên catalog: một người ghi pipeline, một người chỉ đọc \code{marts}.
+\end{itemize}
+\hoanthanh{bạn chỉ ra được \code{metadata.json}, manifest list và manifest của một bảng trên object storage, và người dùng chỉ đọc bị từ chối khi ghi.}
+
+\subsection{Mốc 3: pipeline tăng dần có test (sau Phần III)}
+\begin{itemize}
+  \item Chia CSV \code{orders} theo ngày mua để giả lập dữ liệu đến dần; nạp tăng dần bằng watermark và \code{MERGE} theo khoá.
+  \item Viết DAG Airflow cho chuỗi raw, staging, core, marts; giới hạn số task ghi Iceberg cùng lúc bằng pool.
+  \item Thêm test unique, not null, relationships trên \code{core}; test lỗi thì \code{marts} không được build.
+  \item Bật CI chạy test mỗi lần push.
+\end{itemize}
+\hoanthanh{chạy lại cùng một ngày hai lần không làm đổi số dòng, và một dòng trùng cố ý chèn vào làm pipeline dừng trước \code{marts}.}
+
+\subsection{Mốc 4: phục vụ và cloud (sau Phần IV)}
+\begin{itemize}
+  \item Nối Trino vào REST catalog, tạo dashboard Metabase trả lời 5 câu hỏi ở mốc 1.
+  \item Tuỳ chọn: thêm nhánh streaming, đẩy sự kiện đơn hàng qua Kafka, Flink ghi vào Iceberg.
+  \item Dựng bản trên AWS bằng Terraform: S3, Glue Data Catalog, Athena; đặt AWS Budgets trước khi tạo bất cứ thứ gì; xoá sạch bằng \code{terraform destroy}.
+\end{itemize}
+\hoanthanh{dashboard chạy trên dữ liệu của chính pipeline, và hoá đơn AWS của mốc này nằm trong ngân sách bạn đặt.}
+
+\section{Tiêu chí tự đánh giá}
+\begin{xltabular}{\textwidth}{@{}P{3.4cm} L L@{}}
+\toprule
+\thd{tiêu chí} & \thd{đạt} & \thd{tốt} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Chạy được & \code{docker compose up} cộng một lệnh khởi tạo là chạy hết pipeline & có \code{make} target cho từng tầng, có dữ liệu mẫu nhỏ để chạy nhanh \\
+Chạy lại an toàn & chạy lại không sinh trùng & backfill được một khoảng ngày bất kỳ \\
+Chất lượng & có test trên khoá và quan hệ & test chặn tầng sau, có write-audit-publish cho một bảng \\
+Mô hình dữ liệu & grain và khoá được ghi rõ & có SCD loại 2 cho ít nhất một bảng chiều \\
+Vận hành & có lịch compaction và expire snapshot & có runbook xử lý lỗi thường gặp \\
+Tài liệu & README, sơ đồ kiến trúc & ghi lại các quyết định thiết kế và lý do \\
+Chi phí cloud & có budget và teardown & ghi lại chi phí thật của mỗi lần chạy \\
+\end{xltabular}
+
+% ====================== CHỨNG CHỈ ======================
+\plainchapter{Ánh xạ tới chứng chỉ}
+
+Lộ trình dạy nguyên lý bằng công cụ mã nguồn mở, nên không thay được phần ôn dịch vụ cụ thể của từng cloud. Bảng dưới cho biết module nào phủ phần nào của hai chứng chỉ data engineer phổ biến, để bạn biết cần bổ sung gì khi ôn.
+
+\section{AWS Certified Data Engineer -- Associate (DEA-C01)}
+Theo \href{https://docs.aws.amazon.com/aws-certification/latest/data-engineer-associate-01/data-engineer-associate-01.html}{exam guide chính thức}: 50 câu tính điểm và 15 câu không tính điểm, điểm đạt 720 trên thang 100 tới 1.000, chấm theo tổng chứ không yêu cầu đạt từng phần. Ứng viên mục tiêu có kinh nghiệm data engineering tương đương 2 tới 3 năm và ít nhất 1 tới 2 năm thực hành trên AWS. Theo \href{https://aws.amazon.com/certification/certified-data-engineer-associate/}{trang chứng chỉ}: thi 130 phút, 65 câu, phí 150 USD, có tiếng Anh, Nhật, Hàn và Trung giản thể.
+
+\begin{xltabular}{\textwidth}{@{}P{5.2cm} r P{2.4cm} L@{}}
+\toprule
+\thd{domain} & \thd{tỷ trọng} & \thd{module} & \thd{cần bổ sung khi ôn} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1. Data Ingestion and Transformation & 34\% & 7, 8, 9, 12 & Glue ETL, Kinesis, MSK, Step Functions, MWAA \\
+2. Data Store Management & 26\% & 3, 4, 5, 6 & lựa chọn giữa S3, Redshift, DynamoDB; Lake Formation \\
+3. Data Operations and Support & 22\% & 9, 10, 11, 13 & CloudWatch, Athena, giám sát pipeline \\
+4. Data Security and Governance & 18\% & 6, 13 & IAM, KMS, Lake Formation, Macie, CloudTrail \\
+\end{xltabular}
+
+\section{Google Cloud Professional Data Engineer}
+Theo \href{https://cloud.google.com/learn/certification/data-engineer}{trang chứng chỉ}: thi 2 giờ, 40 tới 50 câu, phí 200 USD, bằng tiếng Anh hoặc tiếng Nhật, hiệu lực 2 năm, không có điều kiện tiên quyết; Google khuyến nghị từ 3 năm kinh nghiệm, trong đó ít nhất 1 năm thiết kế và quản lý giải pháp trên Google Cloud. Trang này báo đề thi sắp được cập nhật theo tên sản phẩm mới, nên hãy đối chiếu \href{https://services.google.com/fh/files/misc/professional_data_engineer_exam_guide_english.pdf}{exam guide} trước khi ôn. Tên sản phẩm trong đề có thể còn là tên cũ. Google có \href{https://www.skills.google/paths/16}{learning path chính thức} gồm khoá học, lab và skill badge cho chứng chỉ này.
+
+\begin{xltabular}{\textwidth}{@{}P{5.2cm} P{2.4cm} L@{}}
+\toprule
+\thd{mục của exam guide} & \thd{module} & \thd{cần bổ sung khi ôn} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1. Design data processing systems & 2, 3, 5, 13 & lựa chọn dịch vụ, bảo mật và tuân thủ trên Google Cloud \\
+2. Ingest and process the data & 7, 8, 9, 12 & Dataflow, Pub/Sub, Managed Service for Apache Spark (trước là Dataproc), Cloud Composer \\
+3. Store the data & 4, 5, 6 & BigQuery, Cloud Storage, Bigtable, Spanner, Lakehouse (trước là BigLake) \\
+4. Prepare and use data for analysis & 3, 11 & BigQuery cho phân tích, chia sẻ dữ liệu, BigQuery ML \\
+5. Maintain and automate data workloads & 9, 10, 13 & giám sát, tối ưu chi phí và độ tin cậy \\
+\end{xltabular}
+
+% ---------------- career ----------------
+\plainchapter{Nghề nghiệp: portfolio, phỏng vấn và cộng đồng}
+
+Chương này không phải một module có giờ cố định; nó chạy song song suốt lộ trình, khoảng 1 giờ mỗi tuần, cộng 30--40 giờ ôn tập trước khi ứng tuyển. Mục tiêu là biến những gì bạn dựng trong các module thành bằng chứng mà nhà tuyển dụng kiểm được: một project chạy lại được, vài bài viết kỹ thuật, một đóng góp mã nguồn mở và khả năng giải thích đánh đổi khi phỏng vấn.
+
+\section{Portfolio: một project lakehouse chạy lại được}
+\begin{enumerate}
+  \item \textbf{Một project, nhiều lát.} Gom lakehouse Olist qua các module vào một kho GitHub công khai: raw → staging/core → marts trên Iceberg, orchestration bằng Airflow, test chất lượng, lớp phục vụ Trino và Metabase, tuỳ chọn một luồng streaming và một lát cloud.
+  \item \textbf{README là sản phẩm.} Nêu bài toán kinh doanh, sơ đồ kiến trúc, mô hình dữ liệu, ``cách chạy'' bằng ít lệnh trên máy sạch, phần chi phí và đánh đổi, và cách kiểm kết quả.
+  \item \textbf{Dùng một rubric công khai.} \href{https://github.com/DataTalksClub/data-engineering-zoomcamp/blob/main/projects/README.md}{Rubric project của DE Zoomcamp} có 7 tiêu chí, mỗi tiêu chí tối đa 4 điểm: mô tả bài toán, cloud (đạt điểm tối đa khi dùng cloud cùng công cụ IaC), ingestion có orchestration, bảng warehouse được tối ưu, biến đổi dữ liệu, dashboard (tối đa khi có hai ô), khả năng chạy lại. Test, \code{make} và CI là gợi ý ``going the extra mile'', không được tính điểm.
+  \item \textbf{Viết 2--3 bài kỹ thuật ngắn.} Một quyết định thiết kế (ví dụ chọn partition cho bảng orders), một lỗi hay sự cố bạn tìm ra và cách sửa, một số đo hiệu năng hay chi phí (ví dụ byte quét của Athena ở Module 13).
+\end{enumerate}
+
+\section{Thị trường việc làm ở Việt Nam: đọc số liệu đúng cách}
+\href{https://itviec.com/bao-cao/luong-it-va-thi-truong-tuyen-dung-it-vietnam}{Báo cáo Lương \& Thị trường Tuyển dụng IT 2025--2026 của ITviec} khảo sát 1.839 người (hai đợt trực tuyến: 27/05--31/07 và 21/10--11/11/2025). Bảng lương ghi Data Engineer có trung vị 41,3 triệu đồng (đơn vị của bảng là triệu VND); theo số năm kinh nghiệm, chỉ nhóm 3--4 năm có số (56,9 triệu đồng), các nhóm dưới 1 năm, 1--2 năm, 5--8 năm và trên 8 năm để trống. Bản đầy đủ cần điền form để nhận qua email.
+
+Vì vậy:
+\begin{itemize}
+  \item Trung vị 41,3 triệu gộp mọi cấp, không phải mức cho người mới.
+  \item Báo cáo không có số cho nhóm dưới 3 năm, nên đừng suy ra mức junior từ báo cáo này.
+  \item Cách thực tế hơn là đọc vài tin tuyển dụng thật và ghi lại kỹ năng lặp lại (xem bài tập ở dưới).
+\end{itemize}
+
+\section{Ôn phỏng vấn bằng tài liệu chính thức và miễn phí}
+\begin{xltabular}{\textwidth}{@{}P{3.0cm} P{5.2cm} L@{}}
+\toprule
+\thd{mảng} & \thd{tài liệu} & \thd{cách dùng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+SQL & \href{https://www.postgresql.org/docs/current/tutorial-window.html}{PostgreSQL: Window Functions}, \href{https://www.postgresql.org/docs/current/queries-with.html}{WITH Queries} & tự viết lại các câu trên Olist: top-N theo nhóm, đơn thứ hai của mỗi khách, chuỗi ngày liên tiếp (gaps and islands), doanh thu luỹ kế \\
+Mô hình dữ liệu & \href{https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/}{Kimball Dimensional Modeling Techniques} & fact, dimension, grain, SCD loại 1 và 2 trên Olist \\
+Spark & \href{https://spark.apache.org/docs/latest/sql-performance-tuning.html}{Spark SQL Performance Tuning} & shuffle, broadcast join, AQE, đọc Spark UI \\
+Thiết kế hệ thống dữ liệu & \href{https://docs.aws.amazon.com/wellarchitected/latest/analytics-lens/scenarios.html}{Data Analytics Lens: Scenarios} & khung trình bày thiết kế batch và streaming: yêu cầu, luồng dữ liệu, đánh đổi \\
+Đề cương kỹ năng & \href{https://docs.aws.amazon.com/aws-certification/latest/data-engineer-associate-01/data-engineer-associate-01.html}{DEA-C01 exam guide}, \href{https://cloud.google.com/learn/certification/data-engineer}{Google PDE} & dùng danh sách domain làm checklist ôn tập, kể cả khi chưa định thi \\
+Streaming & \href{https://kafka.apache.org/44/design/design/}{Kafka 4.4 Design}, \href{https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/}{Flink time} & giải thích thứ tự, offset, exactly-once, watermark bằng ví dụ của chính bạn \\
+\end{xltabular}
+
+Với câu hỏi hành vi, chuẩn bị 3 câu chuyện theo cấu trúc tình huống, nhiệm vụ, hành động, kết quả, lấy từ chính project: một lỗi pipeline, một đánh đổi thiết kế, một lần tối ưu chi phí hay hiệu năng. Một sự cố thật trong pipeline của bạn thuyết phục hơn ví dụ trong sách.
+
+\section{Đóng góp mã nguồn mở: bắt đầu từ PyIceberg}
+PyIceberg hợp với stack tham chiếu vì bộ test dùng đúng các công cụ bạn đã chạy (\href{https://py.iceberg.apache.org/contributing/}{PyIceberg contributing}):
+\begin{enumerate}
+  \item \code{make install} cài uv nếu cần, tạo \code{.venv} và cài dependency; chọn bản Python bằng \code{PYTHON=3.12 make install}.
+  \item \code{make test} chạy pytest có đo coverage; test S3 và ADLS bị bỏ qua mặc định: \code{make test-s3} cần RustFS đang chạy, \code{make test-adls} cần azurite.
+  \item \code{make test-integration} khởi động lại container rồi chạy bộ test tích hợp; test Spark chạy Spark trong container để tạo bảng cho PyIceberg đọc.
+  \item \code{make lint} chạy prek để format và lint; \code{prek install} cài pre-commit hook.
+  \item Tìm việc trong các issue có nhãn \href{https://github.com/apache/iceberg-python/issues?q=is\%3Aissue+is\%3Aopen+label\%3A\%22good+first+issue\%22}{good first issue} và bình luận trước khi làm. Docs và test cũng là đóng góp có giá trị.
+\end{enumerate}
+\begin{luuy}
+Không bao giờ chạy test tích hợp của PyIceberg vào catalog thật: bộ test xoá dữ liệu trên toàn catalog, docs ghi rõ ``Do not run against production catalogs'' (\href{https://py.iceberg.apache.org/contributing/}{PyIceberg contributing}).
+\end{luuy}
+Thảo luận thiết kế và bỏ phiếu của Apache Iceberg diễn ra trên mailing list; đăng ký dev list bằng thư tới \code{dev-subscribe@iceberg.apache.org} và xem các kênh khác ở \href{https://iceberg.apache.org/community/}{Iceberg community}.
+
+\section{Cộng đồng, khoá học có lịch và sự kiện}
+\begin{itemize}
+  \item \href{https://github.com/DataTalksClub/data-engineering-zoomcamp}{DE Zoomcamp}: tự học bất cứ lúc nào; lớp có hạn nộp tiếp theo bắt đầu 01/2027. Tham gia lớp mới có chấm bài, chấm chéo project và chứng chỉ; tự học thì không.
+  \item \href{https://meetup.com/ho-chi-minh-city-data-meetup-group}{HCMC Data Meetup}: nhóm meetup dữ liệu ở TP.HCM, từng tổ chức buổi bằng tiếng Việt.
+  \item \href{https://kubernetes.io/vi/docs/tutorials/kubernetes-basics/}{Kubernetes Basics} có bản tiếng Việt chính thức, hữu ích khi bạn bắt đầu học vận hành container.
+  \item Sự kiện của các dự án trong lộ trình: \href{https://www.icebergsummit.org/}{Iceberg Summit} (bản 2026 diễn ra 8--9/04/2026 ở San Francisco), \href{https://current.confluent.io/}{Current} (San Francisco, 4--5/11/2026), \href{https://www.databricks.com/dataaisummit}{Data + AI Summit} (21--24/06/2027). Phần lớn talk được đăng lại miễn phí sau sự kiện; xem talk về công cụ bạn đang dùng thay vì cố theo hết.
+\end{itemize}
+
+\section{Bài tập}
+\begin{xltabular}{\textwidth}{@{}P{0.6cm} L P{1.8cm}@{}}
+\toprule
+\thd{\#} & \thd{bài} & \thd{giờ} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & Tự chấm project theo 7 tiêu chí của rubric Zoomcamp; với mỗi tiêu chí dưới 4 điểm, ghi việc cần làm & 1 \\
+2 & 30--50 câu SQL trên Olist bằng PostgreSQL hoặc DuckDB, có window function, CTE đệ quy và gaps and islands & 15--20 \\
+3 & Mô hình hoá Olist thành star schema có một dimension SCD loại 2; viết một trang giải thích grain & 4 \\
+4 & Thiết kế thử trong 45 phút: ``pipeline đơn hàng hằng ngày từ API vào lakehouse tới dashboard''; viết lại kèm đánh đổi theo Data Analytics Lens & 2 \\
+5 & Ba câu chuyện hành vi lấy từ project & 3 \\
+6 & Đọc 5 tin tuyển dụng Data Engineer thật: ba kỹ năng nào xuất hiện ở cả năm tin, project của bạn chứng minh được kỹ năng nào? & 1 \\
+7 & Chạy \code{make install}, \code{make test} và \code{make test-s3} của PyIceberg với RustFS; chọn một good first issue & 3--5 \\
+\end{xltabular}
+
+\section{Danh sách tự kiểm tra}
+\begin{enumerate}
+  \item Một người lạ chạy được project từ README trên máy sạch trong khoảng 30 phút chưa?
+  \item Với mỗi tiêu chí rubric bạn tự chấm 4 điểm, bằng chứng nằm ở file hay ảnh chụp nào?
+  \item Bạn giải thích được vì sao trung vị lương trong báo cáo ITviec không phải mức lương cho người mới?
+  \item Bạn viết được câu SQL trả đơn thứ hai của mỗi khách mà không dùng \code{LIMIT} hay \code{OFFSET} theo nhóm chưa?
+  \item Bạn giải thích được khi nào chọn SCD loại 2 thay loại 1 cho dimension khách hàng?
+  \item Bạn chỉ ra được trên Spark UI chỗ nào có shuffle và vì sao?
+  \item Bạn làm ingestion Olist idempotent bằng cách nào, và chứng minh ra sao?
+  \item Vì sao không bao giờ trỏ test tích hợp của PyIceberg vào catalog thật?
+  \item Quyết định thiết kế của Iceberg được thảo luận và bỏ phiếu ở đâu?
+  \item Bạn đã có ít nhất một bài viết kỹ thuật và một pull request hay issue công khai chưa?
+\end{enumerate}
+
+
+% ---------------- appendix ----------------
+% ====================== PHỤ LỤC ======================
+\plainchapter{Phụ lục A: Thuật ngữ dễ nhầm}
+
+Nhiều từ trong data engineering có hai, ba nghĩa tuỳ ngữ cảnh. Khi đọc docs, hãy xác định bạn đang ở ngữ cảnh nào.
+
+\begin{xltabular}{\textwidth}{@{}P{2.2cm} L L@{}}
+\toprule
+\thd{từ} & \thd{nghĩa trong lakehouse của lộ trình} & \thd{nghĩa khác hay gặp} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+warehouse & thư mục gốc trên object storage mà catalog Iceberg dùng để đặt bảng (thuộc tính \code{warehouse} khi cấu hình catalog) & data warehouse: hệ thống lưu trữ và truy vấn phân tích \\
+watermark & mốc cao nhất đã nạp trong tải tăng dần (high-water mark) & mốc event time trong streaming, cho biết engine coi dữ liệu trước mốc đó là đã đủ (\href{https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/}{Flink: Timely Stream Processing}) \\
+catalog & Iceberg catalog: giữ con trỏ tới metadata hiện hành của từng bảng (\href{https://iceberg.apache.org/spec/}{Iceberg spec}) & data catalog để tìm kiếm và mô tả dữ liệu cho người dùng \\
+schema & namespace chứa bảng trong Spark SQL và Trino & danh sách cột và kiểu của một bảng \\
+partition & partition của bảng Iceberg, có thể ẩn qua transform (\href{https://iceberg.apache.org/docs/latest/partitioning/}{Iceberg partitioning}) & phần dữ liệu trong bộ nhớ Spark khi tính toán; partition của topic Kafka \\
+snapshot & một phiên bản của bảng Iceberg tại một lần commit & periodic snapshot fact table của Kimball; snapshot của dbt dùng cho SCD loại 2 (\href{https://docs.getdbt.com/docs/build/snapshots}{dbt snapshots}) \\
+staging & tầng dữ liệu đã ép kiểu, nằm giữa raw và core & môi trường staging trước production; lớp model staging của dbt \\
+commit & một lần đổi con trỏ metadata của bảng Iceberg & git commit; commit offset của Kafka consumer \\
+lineage & đường đi của dữ liệu từ nguồn tới dashboard (\href{https://openlineage.io/docs/}{OpenLineage}) & lineage của Spark dùng để tính lại dữ liệu bị mất \\
+contract & data contract giữa bên sinh và bên dùng dữ liệu (\href{https://bitol.io/}{Open Data Contract Standard}) & model contract của dbt: kiểm tên và kiểu cột khi build (\href{https://docs.getdbt.com/docs/mesh/govern/model-contracts}{dbt model contracts}) \\
+\end{xltabular}
+
+\plainchapter{Phụ lục B: Sách đọc thêm}
+
+Sách không bắt buộc: mọi module đều học được chỉ bằng docs chính thức. Sách hữu ích khi bạn muốn một mạch trình bày dài, có ví dụ và lý giải thiết kế. Thông tin ấn bản được kiểm ngày 02/11/2026.
+
+\begin{xltabular}{\textwidth}{@{}L P{4.3cm} P{1.8cm}@{}}
+\toprule
+\thd{sách} & \thd{ấn bản} & \thd{module} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://martin.kleppmann.com/2026/03/24/designing-data-intensive-applications-2e.html}{Designing Data-Intensive Applications}, Martin Kleppmann và Chris Riccomini & bản 2, O'Reilly, 2026, 14 chương & 4, 5, 7, 8, 12 \\
+\href{https://www.oreilly.com/library/view/fundamentals-of-data/9781098108298/}{Fundamentals of Data Engineering}, Joe Reis và Matt Housley & O'Reilly, 2022 & 2, 8 \\
+\href{https://oreilly.com/library/view/the-data-warehouse/9781118530801}{The Data Warehouse Toolkit}, Ralph Kimball và Margy Ross & bản 3, Wiley, 2013 & 3 \\
+\href{https://db-book.com/}{Database System Concepts} & bản 7, McGraw-Hill, 2019 & 1 \\
+\href{https://oreilly.com/library/view/sql-antipatterns-volume/9798888650011}{SQL Antipatterns, Volume 1}, Bill Karwin & bản 2, Pragmatic Bookshelf, 2022 & 1 \\
+Learning Spark & bản 2, O'Reilly, 2020 & 7 \\
+\href{https://oreilly.com/library/view/high-performance-spark/9781098145842}{High Performance Spark} & bản 2, O'Reilly, 2026 & 7 \\
+\href{https://oreilly.com/library/view/apache-iceberg-the/9781098148614}{Apache Iceberg: The Definitive Guide} & O'Reilly, 2024 & 5, 6 \\
+\href{https://manning.com/books/data-pipelines-with-apache-airflow-second-edition}{Data Pipelines with Apache Airflow} & bản 2, Manning, 2026, viết cho Airflow 3 & 9 \\
+\href{https://trino.io/trino-the-definitive-guide.html}{Trino: The Definitive Guide} & bản 2, O'Reilly, 2022; tải miễn phí qua Starburst & 11 \\
+\href{https://oreilly.com/library/view/~/9781492043072}{Kafka: The Definitive Guide} & bản 2, O'Reilly, 2021 & 12 \\
+\end{xltabular}
+
+\plainchapter{Về tài liệu này}
+
+\begin{itemize}
+  \item Phiên bản 1.0, cập nhật ngày 02/11/2026. Phiên bản phần mềm, thông tin chứng chỉ và link được kiểm với nguồn chính thức vào ngày này.
+  \item Kiến thức kỹ thuật được đối chiếu với docs, spec và release notes chính thức của từng dự án và nhà cung cấp, không dựa vào bài báo khoa học hay blog cá nhân.
+  \item Thời lượng là ước tính cho phần lõi; tốc độ thật phụ thuộc nền tảng của bạn.
+  \item Khi một link hỏng hoặc một hành vi thay đổi ở phiên bản mới, nguồn đúng luôn là docs của phiên bản bạn đang chạy.
+\end{itemize}
+
+
+\end{document}
