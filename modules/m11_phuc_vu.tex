@@ -1,0 +1,188 @@
+\modulechapter{11}{Phục vụ dữ liệu: Trino và BI}
+\moduleinfo{Trung cấp}{15 giờ}{Module 3, 5, 6}
+
+Sau khi các bảng marts (gold) đã nằm trong Iceberg, người phân tích cần hỏi dữ liệu bằng SQL và xem dashboard mà không chạm được vào dữ liệu gốc. Module này đặt Trino làm query engine chỉ đọc trên cùng Iceberg REST catalog mà Spark đang ghi, rồi nối Metabase lên trên. Bạn sẽ chứng minh điều kiện lọc được đẩy xuống bảng Iceberg, khoá quyền ghi ở tầng Trino, và biết khi nào nên tính sẵn (bảng tổng hợp, materialized view) hay định nghĩa metric bằng code (semantic layer). Học xong, bạn dựng được một lớp phục vụ dữ liệu nhỏ nhưng đúng nguyên tắc cho bộ dữ liệu Olist.
+
+\section{Bạn sẽ học được}
+\begin{itemize}
+  \item Giải thích vai trò của coordinator, worker, connector, catalog và split trong Trino.
+  \item Cấu hình connector Iceberg của Trino với REST catalog và object storage tương thích S3.
+  \item Đọc \code{EXPLAIN} và \code{EXPLAIN ANALYZE} để chứng minh pushdown và việc chỉ đọc file cần thiết.
+  \item Thiết lập phân quyền chỉ đọc và phân quyền theo file cho người dùng phân tích.
+  \item Kết nối Metabase bản mã nguồn mở với Trino và dựng dashboard trên marts Olist.
+  \item Chọn cách phục vụ phù hợp: bảng tổng hợp sẵn, materialized view của Trino, DuckDB ở local, hoặc semantic layer với MetricFlow.
+\end{itemize}
+
+\section{Nội dung chính}
+\begin{enumerate}
+  \item \textbf{Trino là query engine, không phải cơ sở dữ liệu.} Trino chạy SQL phân tán trên dữ liệu nằm ở nơi khác; mỗi nguồn được nối qua một connector và xuất hiện dưới dạng một catalog (\href{https://trino.io/docs/current/overview/concepts.html}{Trino concepts}).
+  \item \textbf{Coordinator, worker, split.} Coordinator nhận câu truy vấn, lập kế hoạch và điều phối; worker thực thi task và xử lý dữ liệu. Split là một phần dữ liệu mà một task xử lý; câu truy vấn được chia thành stage, task và split (\href{https://trino.io/docs/current/overview/concepts.html}{Trino concepts}).
+  \item \textbf{Connector Iceberg và loại catalog.} Thuộc tính \code{iceberg.\allowbreak catalog.\allowbreak type} nhận \code{hive\_\allowbreak metastore} (mặc định), \code{glue}, \code{jdbc}, \code{rest}, \code{nessie}, \code{snowflake}. Với REST catalog, đặt \code{iceberg.\allowbreak catalog.\allowbreak type=rest} và \code{iceberg.\allowbreak rest-catalog.\allowbreak uri}; có thể thêm \code{iceberg.\allowbreak rest-catalog.\allowbreak warehouse}, \code{iceberg.\allowbreak rest-catalog.\allowbreak security} (\code{NONE} mặc định, \code{OAUTH2}, \code{SIGV4}, \code{GOOGLE}) và \code{iceberg.\allowbreak rest-catalog.\allowbreak vended-credentials-enabled} (\href{https://trino.io/docs/current/connector/iceberg.html}{Iceberg connector}, \href{https://trino.io/docs/current/object-storage/metastores.html}{Metastores}).
+  \item \textbf{Đọc object storage.} Bật S3 gốc của Trino bằng \code{fs.\allowbreak s3.\allowbreak enabled=true}, rồi đặt \code{s3.endpoint}, \code{s3.region}, \code{s3.\allowbreak path-style-access} và khoá truy cập; với RustFS ở local cần path-style (\href{https://trino.io/docs/current/object-storage/file-system-s3.html}{S3 file system support}).
+  \item \textbf{Pushdown.} Connector có thể nhận một phần công việc: điều kiện lọc, cột cần đọc, aggregation, limit. Mức hỗ trợ khác nhau theo connector (\href{https://trino.io/docs/current/optimizer/pushdown.html}{Pushdown}). Iceberg lưu đường dẫn data file trong metadata, nên Trino chỉ hỏi file system về những file phải đọc (\href{https://trino.io/docs/current/connector/iceberg.html}{Iceberg connector}).
+  \item \textbf{Đọc kế hoạch truy vấn.} \code{EXPLAIN (TYPE DISTRIBUTED)} cho thấy fragment và exchange; \code{EXPLAIN ANALYZE} chạy câu thật và báo số dòng, thời gian ở từng toán tử (\href{https://trino.io/docs/current/sql/explain.html}{EXPLAIN}). Bảng metadata như \code{"orders\$snapshots"}, \code{"orders\$files"}, \code{"orders\$partitions"} giúp bạn đối chiếu (\href{https://trino.io/docs/current/connector/iceberg.html}{Iceberg connector}).
+  \item \textbf{Phân quyền hệ thống.} Đặt thuộc tính \code{access-control.\allowbreak name} trong \code{etc/\allowbreak access-control.\allowbreak properties} trên coordinator. Giá trị dựng sẵn: \code{default}, \code{allow-all}, \code{read-only}, \code{file}, \code{opa}, \code{ranger}. \code{read-only} cho phép \code{SELECT}, \code{SHOW} và đặt session property, cấm mọi thao tác ghi dữ liệu hay metadata như \code{CREATE}, \code{INSERT}, \code{DELETE} (\href{https://trino.io/docs/current/security/built-in-system-access-control.html}{System access control}). \code{file} đọc luật theo user, catalog, schema, bảng từ file JSON (\href{https://trino.io/docs/current/security/file-system-access-control.html}{File-based access control}).
+  \item \textbf{Đồng thời cho BI.} Resource group giới hạn số truy vấn chạy cùng lúc và xếp hàng phần còn lại, để dashboard không chiếm hết cluster (\href{https://trino.io/docs/current/admin/resource-groups.html}{Resource groups}).
+  \item \textbf{Materialized view trên Iceberg.} Connector Iceberg lưu kết quả vào một storage table và làm mới bằng \code{REFRESH MATERIALIZED VIEW}. Incremental refresh bật mặc định (\code{iceberg.\allowbreak incremental-refresh-enabled}); nó quét ít dữ liệu nguồn hơn nhưng dùng append nên có thể sinh thêm data file; đặt \code{false} để luôn refresh toàn bộ (\href{https://trino.io/docs/current/connector/iceberg.html}{Iceberg connector}).
+  \item \textbf{Metabase.} Driver Starburst của Metabase ``also works for connections to a Trino database''; các trường cần điền là host, port, catalog, schema (tuỳ chọn), username, role (tuỳ chọn), SSL (\href{https://www.metabase.com/docs/latest/databases/connections/starburst}{Metabase: Starburst}). Trên docs v0.65, chính sách cache Duration và Schedule, cache theo dashboard, cache theo câu hỏi và tự làm mới cache chỉ có ở gói Pro và Enterprise (\href{https://www.metabase.com/docs/latest/configuring-metabase/caching}{Metabase caching}). Apache Superset là phương án BI mã nguồn mở khác (\href{https://superset.apache.org/docs/intro/}{Superset docs}).
+  \item \textbf{Semantic layer.} MetricFlow sinh SQL từ metric định nghĩa bằng YAML, là nền của dbt Semantic Layer, cấp phép Apache 2.0. Khái niệm: semantic model, entity (khoá join), dimension, metric (simple, ratio, derived, cumulative, conversion) (\href{https://docs.getdbt.com/docs/build/about-metricflow}{About MetricFlow}). Tự host thì cài \code{metricflow} bằng pip và chạy lệnh \code{mf}; truy vấn metric động từ công cụ downstream qua dbt Semantic Layer cần tài khoản dbt Starter, Enterprise hoặc Enterprise+ (\href{https://docs.getdbt.com/docs/build/metricflow-commands}{MetricFlow commands}). Cú pháp YAML đổi từ dbt v1.12, nên đọc docs đúng phiên bản.
+  \item \textbf{DuckDB làm lớp phục vụ local.} DuckDB chạy nhúng trong tiến trình, đọc được bảng Iceberg qua extension \code{iceberg}, hợp để thử câu hỏi, test và trích dữ liệu nhỏ; Trino hợp hơn khi nhiều người cùng truy vấn qua mạng (\href{https://duckdb.org/docs/2.0/core_extensions/iceberg/overview.html}{DuckDB Iceberg extension}).
+\end{enumerate}
+
+\section{Bắt đầu}
+\begin{enumerate}
+  \item Chạy Trino bằng container theo \href{https://trino.io/docs/current/installation/containers.html}{Trino in a Docker container}, ghim image \code{trinodb/\allowbreak trino:484}.
+  \item Thêm một catalog Iceberg dùng REST theo ví dụ tối thiểu ở \href{https://trino.io/docs/current/object-storage/metastores.html}{Metastores} (\code{connector.\allowbreak name=iceberg}, \code{iceberg.\allowbreak catalog.\allowbreak type=rest}, \code{iceberg.\allowbreak rest-catalog.\allowbreak uri}).
+  \item Chạy Metabase bản mã nguồn mở theo \href{https://www.metabase.com/start/oss/}{Metabase OSS} và nối vào Trino bằng driver Starburst.
+\end{enumerate}
+
+\section{Tài liệu chính thức}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{1.8cm}@{}}
+\toprule
+\thd{tài liệu} & \thd{nội dung cần đọc} & \thd{thời lượng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://trino.io/docs/current/overview/concepts.html}{Trino 484: Concepts} & server, coordinator, worker, catalog, connector, stage, task, split & 1 giờ \\
+\href{https://trino.io/docs/current/connector/iceberg.html}{Trino: Iceberg connector} & cấu hình chung, metadata table, materialized views & 1,5 giờ \\
+\href{https://trino.io/docs/current/object-storage/metastores.html}{Trino: Metastores} & mục REST catalog: URI, warehouse, security, vended credentials & 0,5 giờ \\
+\href{https://trino.io/docs/current/object-storage/file-system-s3.html}{Trino: S3 file system support} & \code{fs.\allowbreak s3.\allowbreak enabled}, endpoint, path-style & 0,5 giờ \\
+\href{https://trino.io/docs/current/optimizer/pushdown.html}{Trino: Pushdown}, \href{https://trino.io/docs/current/sql/explain.html}{EXPLAIN} & các loại pushdown; đọc kế hoạch phân tán & 1 giờ \\
+\href{https://trino.io/docs/current/security/built-in-system-access-control.html}{Trino: System access control}, \href{https://trino.io/docs/current/security/file-system-access-control.html}{File-based} & \code{read-only}, luật catalog, schema, bảng & 1 giờ \\
+\href{https://trino.io/docs/current/admin/resource-groups.html}{Trino: Resource groups} & giới hạn đồng thời, hàng đợi & 0,5 giờ \\
+\href{https://www.metabase.com/docs/latest/databases/connections/starburst}{Metabase: Starburst/Trino}, \href{https://www.metabase.com/docs/latest/configuring-metabase/caching}{Caching} & kết nối; tính năng cache theo gói & 1 giờ \\
+\href{https://docs.getdbt.com/docs/build/about-metricflow}{dbt: About MetricFlow}, \href{https://docs.getdbt.com/docs/build/metricflow-commands}{MetricFlow commands} & semantic model, metric, lệnh \code{mf} & 1 giờ \\
+\href{https://duckdb.org/docs/2.0/core_extensions/iceberg/overview.html}{DuckDB: Iceberg extension} & đọc bảng Iceberg, nối REST catalog & 0,5 giờ \\
+\end{xltabular}
+
+\section{Khoá học miễn phí}
+\begin{itemize}
+  \item \href{https://trino.io/trino-the-definitive-guide.html}{Trino: The Definitive Guide, bản 2} (O'Reilly, 10/2022, 319 trang): trang chính thức của Trino có link ``Free digital copy from Starburst''. Sách viết trước Trino 484, nên kiểm lại tên thuộc tính với docs hiện hành.
+  \item \href{https://15445.courses.cs.cmu.edu/fall2025/schedule.html}{CMU 15-445 Fall 2025}: bài giảng và slide miễn phí; xem nhóm bài về thực thi và tối ưu truy vấn nếu muốn hiểu sâu join và cost-based optimizer.
+\end{itemize}
+
+\section{Lab thực hành}
+
+\subsection{Lab 1: Trino trên Iceberg REST catalog}
+\begin{enumerate}
+  \item Thêm service \code{trinodb/\allowbreak trino:484} vào Docker Compose của stack tham chiếu, cùng mạng với RustFS và REST catalog.
+  \item Tạo file \code{etc/catalog/lake.properties} (thay giá trị theo catalog của bạn; với Polaris hay Lakekeeper, lấy URI, warehouse và thông tin OAuth2 từ quickstart của dự án):
+\end{enumerate}
+\begin{codeblock}
+connector.name=iceberg
+iceberg.catalog.type=rest
+iceberg.rest-catalog.uri=http://iceberg-rest:8181
+iceberg.rest-catalog.warehouse=s3://warehouse/
+# iceberg.rest-catalog.security=OAUTH2
+# iceberg.rest-catalog.oauth2.credential=<client_id>:<client_secret>
+fs.s3.enabled=true
+s3.endpoint=http://rustfs:9000
+s3.region=us-east-1
+s3.path-style-access=true
+s3.aws-access-key=<access-key>
+s3.aws-secret-key=<secret-key>
+\end{codeblock}
+\begin{enumerate}[resume]
+  \item Khởi động lại Trino, mở CLI trong container và chạy \code{SHOW SCHEMAS FROM lake}, \code{SHOW TABLES FROM lake.marts}.
+  \item Truy vấn một mart Olist do Spark ghi (ví dụ doanh thu theo tháng và bang của khách), và \code{SELECT * FROM lake.marts."<bảng>\$snapshots"}.
+\end{enumerate}
+\hoanthanh{Trino trả cùng số dòng cho một mart như Spark hoặc PyIceberg, và snapshot mới nhất trong \code{\$snapshots} trùng snapshot mà Spark vừa commit.}
+
+\subsection{Lab 2: Chứng minh pushdown}
+\begin{enumerate}
+  \item Chọn bảng sự kiện đơn hàng có partition theo ngày (hoặc tháng) của \code{order\_\allowbreak purchase\_\allowbreak timestamp}.
+  \item Chạy \code{EXPLAIN (TYPE DISTRIBUTED)} cho một câu lọc theo khoảng ngày và một câu join đơn hàng với khách hàng. Tìm toán tử table scan, điều kiện lọc gắn với nó, và các exchange.
+  \item Chạy \code{EXPLAIN ANALYZE} cho câu lọc theo ngày và câu lọc theo một cột không phải partition; so số dòng và dữ liệu đầu vào của table scan.
+  \item Đếm file của các partition liên quan qua \code{"<bảng>\$files"} để giải thích vì sao lượng đọc khác nhau.
+\end{enumerate}
+\hoanthanh{Bạn có một bảng ngắn: câu truy vấn, số dòng đầu vào của scan, số file liên quan, và một câu giải thích vì sao câu lọc theo partition đọc ít hơn.}
+
+\subsection{Lab 3: Người dùng phân tích chỉ đọc}
+\begin{enumerate}
+  \item Đặt \code{access-control.name=read-only} trong \code{etc/\allowbreak access-control.\allowbreak properties} của coordinator; thử \code{CREATE TABLE} và \code{INSERT}, ghi lại thông báo lỗi.
+  \item Đổi sang \code{access-control.name=file} với \code{security.config-file} trỏ tới file luật. Ví dụ: \code{admin} toàn quyền, \code{analyst} chỉ \code{SELECT} schema \code{marts}:
+\end{enumerate}
+\begin{codeblock}
+{
+  "catalogs": [
+    {"user": "admin", "catalog": ".*", "allow": "all"},
+    {"user": "analyst", "catalog": "lake", "allow": "read-only"}
+  ],
+  "schemas": [
+    {"user": "admin", "schema": ".*", "owner": true},
+    {"user": "analyst", "catalog": "lake", "schema": "marts", "owner": false}
+  ],
+  "tables": [
+    {"user": "admin", "privileges": ["SELECT", "INSERT", "DELETE", "UPDATE", "OWNERSHIP"]},
+    {"user": "analyst", "catalog": "lake", "schema": "marts", "privileges": ["SELECT"]}
+  ]
+}
+\end{codeblock}
+\begin{enumerate}[resume]
+  \item Đăng nhập CLI với \code{--user analyst}; kiểm \code{SHOW SCHEMAS FROM lake} và thử đọc một bảng ở \code{raw}.
+  \item Thêm một resource group cho user \code{analyst} với số truy vấn đồng thời thấp; chạy 5 truy vấn cùng lúc và quan sát hàng đợi trên Web UI.
+\end{enumerate}
+\begin{luuy}
+Trong lab không có xác thực, nên client tự khai tên user. Ở môi trường thật, bật authentication cho Trino trước khi dựa vào luật theo user. Phân quyền ở Metabase không thay được phân quyền ở Trino, vì người dùng có thể nối thẳng vào Trino.
+\end{luuy}
+\hoanthanh{User \code{analyst} đọc được \code{marts}, không thấy hoặc không đọc được \code{raw}, và mọi lệnh ghi đều bị từ chối.}
+
+\subsection{Lab 4: Dashboard Metabase trên marts Olist}
+\begin{enumerate}
+  \item Chạy Metabase OSS bằng Docker; thêm database loại Starburst trỏ vào Trino, catalog \code{lake}, schema \code{marts}, username \code{analyst}.
+  \item Dựng 4 câu hỏi: doanh thu theo tháng, 10 danh mục sản phẩm bán chạy, thời gian giao hàng trung bình theo bang, phân bố điểm review.
+  \item Ghép thành một dashboard có bộ lọc theo khoảng ngày.
+  \item Mở trang cài đặt cache của Metabase, ghi lại tuỳ chọn nào có ở bản mã nguồn mở và tuỳ chọn nào cần Pro hay Enterprise.
+\end{enumerate}
+\hoanthanh{Dashboard trả lời 4 câu hỏi mà người xem không phải viết join, và kết nối dùng user Trino chỉ đọc.}
+
+\section{Kế hoạch theo tuần}
+\begin{xltabular}{\textwidth}{@{}P{1.6cm} L P{1.8cm}@{}}
+\toprule
+\thd{tuần} & \thd{việc} & \thd{giờ} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & Đọc Concepts, Iceberg connector, Metastores, S3 file system, Pushdown, EXPLAIN; làm Lab 1 và Lab 2 & 8 \\
+2 & Đọc access control, resource groups, Metabase; làm Lab 3, Lab 4 và thử thách kỹ năng & 7 \\
+thêm & Materialized view với incremental refresh; MetricFlow trên một project dbt Core; DuckDB đọc cùng bảng; sách Trino TDG; CMU 15-445 & 8 trở lên \\
+\end{xltabular}
+
+\begin{thuthach}
+Bộ phận tài chính cần một dashboard ``doanh thu và phí vận chuyển theo tháng, theo phương thức thanh toán'' cho 2017--2018. Hãy tự thiết kế: một user Trino mới chỉ đọc đúng các bảng cần thiết; một bảng tổng hợp sẵn hoặc một materialized view phục vụ dashboard; bằng chứng từ \code{EXPLAIN ANALYZE} rằng dashboard đọc ít dữ liệu hơn khi truy vấn bảng chi tiết; và một dashboard Metabase dùng user đó.
+\hoanthanh{Dashboard chạy bằng user mới, user này không đọc được bảng ngoài danh sách, và bạn trình bày được số liệu đọc của hai phương án (bảng chi tiết và bảng tính sẵn).}
+\end{thuthach}
+
+\section{Câu hỏi tự kiểm tra}
+\begin{enumerate}
+  \item Coordinator làm gì mà worker không làm? Split là gì?
+  \item Vì sao Trino truy vấn được bảng Iceberg mà không cần nạp dữ liệu vào nó?
+  \item Những thuộc tính nào tối thiểu để Trino đọc một Iceberg REST catalog trên RustFS?
+  \item Trong \code{EXPLAIN ANALYZE}, bạn nhìn vào đâu để biết điều kiện lọc đã tới table scan?
+  \item Vì sao lọc theo cột partition đọc ít file hơn lọc theo cột thường, dù kết quả cùng số dòng?
+  \item \code{read-only} cho phép và cấm những thao tác nào? Nó được cấu hình ở node nào?
+  \item Vì sao phân quyền trong Metabase không đủ để bảo vệ dữ liệu?
+  \item Mười người cùng mở một dashboard lúc 9 giờ sáng: kể ba cách giảm tải, cách nào dùng được trên Metabase bản mã nguồn mở?
+  \item Incremental refresh của materialized view trên Iceberg đánh đổi điều gì?
+  \item Semantic layer giải quyết vấn đề gì mà một bảng marts không giải quyết?
+  \item Khi nào bạn chọn DuckDB thay vì Trino để trả lời một câu hỏi phân tích?
+\end{enumerate}
+
+\section{Điểm dễ nhầm}
+\begin{xltabular}{\textwidth}{@{}P{4.0cm} L P{3.2cm}@{}}
+\toprule
+\thd{điểm dễ nhầm} & \thd{thực tế} & \thd{docs chính thức} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Nhiều người nghĩ Trino lưu dữ liệu như một cơ sở dữ liệu & Trino là query engine; dữ liệu nằm ở nguồn, được đọc qua connector & \href{https://trino.io/docs/current/overview/concepts.html}{Trino concepts} \\
+Join giữa hai catalog khác nhau là ``miễn phí'' & Mức pushdown tuỳ connector; phần không đẩy xuống được thì dữ liệu phải chuyển qua Trino & \href{https://trino.io/docs/current/optimizer/pushdown.html}{Pushdown} \\
+Đặt chỉ đọc trong Metabase là đủ & Người dùng có thể nối thẳng vào Trino; khoá ghi bằng \code{read-only} hoặc luật theo file ở Trino & \href{https://trino.io/docs/current/security/built-in-system-access-control.html}{System access control} \\
+Metabase bản mã nguồn mở có đủ cache như bản trả phí & Duration, Schedule, cache theo dashboard, theo câu hỏi và tự làm mới cache chỉ có ở Pro và Enterprise & \href{https://www.metabase.com/docs/latest/configuring-metabase/caching}{Metabase caching} \\
+Cần driver Trino riêng cho Metabase & Driver Starburst dùng được cho Trino & \href{https://www.metabase.com/docs/latest/databases/connections/starburst}{Metabase: Starburst} \\
+Incremental refresh luôn tốt hơn & Nó quét ít dữ liệu nguồn hơn nhưng có thể tạo thêm data file, cần bảo trì bảng & \href{https://trino.io/docs/current/connector/iceberg.html}{Iceberg connector} \\
+Semantic layer của dbt hoàn toàn miễn phí & MetricFlow là Apache 2.0 và chạy local bằng \code{mf}; truy vấn động từ công cụ downstream qua dbt Semantic Layer cần gói dbt trả phí & \href{https://docs.getdbt.com/docs/build/metricflow-commands}{MetricFlow commands} \\
+\end{xltabular}

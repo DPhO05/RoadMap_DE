@@ -1,0 +1,224 @@
+\modulechapter{3}{Mô hình dữ liệu cho phân tích}
+\moduleinfo{Cơ bản tới trung cấp}{30 giờ}{Module 1}
+
+Hệ OLTP chuẩn hoá để ghi nhanh và nhất quán; người phân tích lại cần bảng dễ đọc, nhất quán và cho số đúng. Module này dạy dimensional modeling theo phương pháp Kimball: chọn quy trình nghiệp vụ, khai báo grain, chọn dimension và fact, theo dõi lịch sử bằng slowly changing dimension. Đây là phần mô hình của tầng marts (gold) trong lakehouse. Học xong, bạn thiết kế và dựng được một star schema cho Olist trên DuckDB, có grain ghi rõ và test chứng minh số liệu đúng.
+
+\section{Bạn sẽ học được}
+
+\begin{itemize}
+  \item Áp dụng bốn bước thiết kế của Kimball và viết grain của mỗi bảng fact trong một câu.
+  \item Phân biệt transaction, periodic snapshot, accumulating snapshot và factless fact; chọn loại hợp với câu hỏi nghiệp vụ.
+  \item Phân loại measure thành cộng được, cộng được một phần và không cộng được.
+  \item Chọn khoá tự nhiên, khoá thay thế và khoá bền cho mỗi dimension; xử lý đúng \code{customer\_\allowbreak{}id} và \code{customer\_\allowbreak{}unique\_\allowbreak{}id} của Olist.
+  \item Cài SCD loại 1 và loại 2 bằng SQL, và biết dbt snapshots làm việc đó thế nào.
+  \item Nhận ra lỗi nhân dòng khi join hai fact khác grain và sửa nó.
+\end{itemize}
+
+\section{Nội dung chính}
+
+\subsection{Nền tảng}
+
+\begin{enumerate}
+  \item \textbf{Fact và dimension.} Dimension mô tả thực thể nghiệp vụ, những “thứ” bạn mô hình hoá; fact lưu sự kiện hoặc quan sát như đơn hàng, thanh toán. Trong star schema, phía “một” của quan hệ luôn là dimension, phía “nhiều” luôn là fact (\href{https://learn.microsoft.com/en-us/power-bi/guidance/star-schema}{Microsoft Learn: star schema}).
+  \item \textbf{Bốn bước thiết kế.} Chọn quy trình nghiệp vụ, khai báo grain, xác định dimension, xác định fact (\href{https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/}{Kimball: Dimensional Modeling Techniques}).
+  \item \textbf{Grain.} Khai báo grain là bước then chốt: nó nói chính xác một dòng fact biểu diễn gì. Atomic grain là mức thấp nhất mà quy trình nghiệp vụ ghi nhận dữ liệu; bắt đầu từ đó cho linh hoạt nhất. Không trộn các grain khác nhau trong một bảng fact (\href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF}).
+  \item \textbf{Loại measure.} Measure cộng được (additive) cộng theo mọi dimension, ví dụ \code{price}. Measure cộng được một phần (semi-additive) cộng theo một số dimension nhưng không theo tất cả, ví dụ số dư tồn kho không cộng theo thời gian. Measure không cộng được (non-additive), ví dụ tỉ lệ, điểm trung bình, phải tính lại từ thành phần (\href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF}).
+\end{enumerate}
+
+\subsection{Bảng fact}
+
+\begin{enumerate}[resume]
+  \item \textbf{Transaction fact.} Một dòng là một sự kiện đo tại một điểm trong không gian và thời gian, ví dụ một món hàng trong một đơn.
+  \item \textbf{Periodic snapshot.} Một dòng tóm tắt nhiều sự kiện trong một chu kỳ chuẩn: ngày, tuần, tháng.
+  \item \textbf{Accumulating snapshot.} Một dòng tóm tắt các sự kiện tại những bước dự đoán được giữa lúc bắt đầu và kết thúc một quy trình, ví dụ một đơn từ lúc đặt tới lúc giao, được cập nhật khi đơn qua từng mốc.
+  \item \textbf{Factless fact.} Chỉ ghi các dimension gặp nhau tại một thời điểm, không có measure (\href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF}). Microsoft gợi ý dùng factless fact làm bảng cầu (bridging table) cho quan hệ nhiều-nhiều giữa các dimension (\href{https://learn.microsoft.com/en-us/power-bi/guidance/star-schema}{Microsoft Learn: star schema}).
+\end{enumerate}
+
+\subsection{Dimension và khoá}
+
+\begin{enumerate}[resume]
+  \item \textbf{Khoá thay thế, khoá tự nhiên, khoá bền.} Kimball khuyên mỗi dimension có khoá chính là số nguyên vô nghĩa do hệ thống phân tích cấp, thay vì dùng lại khoá tự nhiên của nguồn. Khoá tự nhiên có thể đổi, nên cần thêm một khoá bền (durable key) không đổi theo thời gian (\href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF}). Khi dimension có SCD loại 2, một thực thể có nhiều dòng: khoá bền giống nhau ở mọi dòng, còn khoá thay thế khác nhau ở mỗi dòng.
+  \item \textbf{Bẫy khoá của Olist.} Bảng customers có \code{customer\_\allowbreak{}id} và \code{customer\_\allowbreak{}unique\_\allowbreak{}id}. Lab 1.2 cho bạn thấy số giá trị khác nhau của hai cột không bằng nhau: \code{customer\_\allowbreak{}id} gắn với đơn, còn \code{customer\_\allowbreak{}unique\_\allowbreak{}id} định danh người mua. \code{dim\_\allowbreak{}customer} nên có grain một dòng mỗi \code{customer\_\allowbreak{}unique\_\allowbreak{}id}, và fact tra khoá qua \code{orders.\allowbreak{}customer\_\allowbreak{}id} → \code{customers.\allowbreak{}customer\_\allowbreak{}unique\_\allowbreak{}id}.
+  \item \textbf{Date dimension và role-playing.} Một bảng \code{dim\_\allowbreak{}date} được fact tham chiếu nhiều lần với vai trò khác nhau (ngày đặt, ngày duyệt, ngày giao). Kimball gọi mỗi view riêng là một role (\href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF}). Power BI chỉ cho một quan hệ active giữa hai bảng, nên Microsoft khuyên tạo một bảng ngày riêng cho mỗi vai trò khi làm mô hình Power BI (\href{https://learn.microsoft.com/en-us/power-bi/guidance/star-schema}{Microsoft Learn: star schema}).
+  \item \textbf{Degenerate và junk dimension.} Degenerate dimension là khoá không có thuộc tính nào khác, nằm thẳng trên fact, ví dụ \code{order\_\allowbreak{}id}. Junk dimension gộp nhiều cờ và mã nhỏ, ví dụ \code{order\_\allowbreak{}status}, thành một dimension (\href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF}; \href{https://learn.microsoft.com/en-us/power-bi/guidance/star-schema}{Microsoft Learn}).
+  \item \textbf{Conformed dimension và bus matrix.} Dimension conform khi các thuộc tính có cùng tên cột và cùng miền giá trị, cho phép drill-across giữa các fact. Bus matrix có dòng là quy trình nghiệp vụ, cột là dimension (\href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF}).
+  \item \textbf{Dimension tới muộn.} Khi fact tới trước dimension, tạo dòng dimension đặc biệt chứa khoá tự nhiên chưa giải quyết, rồi cập nhật kiểu loại 1 khi thông tin tới (\href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF}).
+  \item \textbf{Star và snowflake.} Snowflake chuẩn hoá một dimension thành nhiều bảng. Microsoft cho rằng với Power BI, lợi ích của một bảng dimension thường lớn hơn lợi ích của nhiều bảng (\href{https://learn.microsoft.com/en-us/power-bi/guidance/star-schema}{Microsoft Learn: star schema}).
+\end{enumerate}
+
+\subsection{Theo dõi lịch sử}
+
+\begin{enumerate}[resume]
+  \item \textbf{SCD loại 0, 1, 2, 3, 6.} Loại 0 giữ giá trị gốc, không bao giờ đổi. Loại 1 ghi đè, mất lịch sử. Loại 2 thêm dòng mới với giá trị mới, có cột ngày hiệu lực, ngày hết hiệu lực và cờ dòng hiện hành. Loại 3 thêm cột để giữ giá trị trước. Loại 6 dựa trên loại 2 và gắn thêm bản loại 1 (giá trị hiện hành) của cùng thuộc tính vào mỗi dòng (\href{https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-2/}{Kimball: Type 2}; \href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF}).
+  \item \textbf{dbt snapshots.} dbt cài SCD loại 2 bằng snapshot: khai báo \code{unique\_\allowbreak{}key} và chiến lược phát hiện thay đổi \code{timestamp} (dựa trên cột \code{updated\_\allowbreak{}at}, được khuyên dùng) hoặc \code{check} (so các cột chọn sẵn). dbt thêm \code{dbt\_\allowbreak{}valid\_\allowbreak{}from}, \code{dbt\_\allowbreak{}valid\_\allowbreak{}to}, \code{dbt\_\allowbreak{}scd\_\allowbreak{}id}, \code{dbt\_\allowbreak{}updated\_\allowbreak{}at}; \code{dbt\_\allowbreak{}valid\_\allowbreak{}to} là NULL ở dòng hiện hành trừ khi đặt \code{dbt\_\allowbreak{}valid\_\allowbreak{}to\_\allowbreak{}current}. Từ dbt 1.9, snapshot khai báo bằng YAML; chạy bằng \code{dbt snapshot} (\href{https://docs.getdbt.com/docs/build/snapshots}{dbt: Snapshots}; \href{https://docs.getdbt.com/reference/snapshot-configs}{Snapshot configurations}).
+\end{enumerate}
+
+\subsection{Mô hình trong lakehouse}
+
+\begin{enumerate}[resume]
+  \item \textbf{Gold là nơi đặt dimensional model.} Databricks đặt việc mô hình hoá bằng dimensional model, thiết lập quan hệ và định nghĩa measure ở lớp gold (\href{https://docs.databricks.com/aws/en/lakehouse/medallion}{Databricks: Medallion}). Ràng buộc PK và FK trên bảng lakehouse thường chỉ để thông tin (Module 1), nên mọi khoá của star schema phải được giữ bằng pipeline và test.
+\end{enumerate}
+
+\section{Bắt đầu}
+
+\begin{itemize}
+  \item Đọc \href{https://learn.microsoft.com/en-us/power-bi/guidance/star-schema}{Microsoft Learn: Understand star schema}, từ đầu tới hết mục surrogate keys (1 giờ).
+  \item Đọc mục Four-Step Dimensional Design Process và Grain trong \href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF} (0,5 giờ).
+\end{itemize}
+
+\section{Tài liệu chính thức}
+
+Kimball Group là trang chính thức của phương pháp Kimball; trang chỉ còn là kho bài viết.
+
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{1.8cm}@{}}
+\toprule
+\thd{tài liệu} & \thd{nội dung cần đọc} & \thd{thời lượng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball Dimensional Modeling Techniques, PDF} & toàn bộ: bốn bước, grain, loại fact, khoá, SCD, conformed dimension, bus matrix & 3 giờ \\
+\href{https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/}{Kimball: Dimensional Modeling Techniques} & bản web có mỗi kỹ thuật một trang, dùng để tra & tra cứu \\
+\href{https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-2/}{Kimball: Type 2, Add New Row} & SCD loại 2 & 0,3 giờ \\
+\href{https://learn.microsoft.com/en-us/power-bi/guidance/star-schema}{Microsoft Learn: Understand star schema} & fact, dimension, surrogate key, role-playing, SCD, junk, degenerate, factless & 1,5 giờ \\
+\href{https://learn.microsoft.com/en-us/fabric/data-warehouse/dimensional-modeling-overview}{Microsoft Fabric: Dimensional modeling} & loạt bài về dimensional modeling trong Fabric Data Warehouse, đọc thêm & 2 giờ \\
+\href{https://docs.getdbt.com/docs/build/snapshots}{dbt: Snapshots} & SCD loại 2, chiến lược \code{timestamp} và \code{check}, \code{hard\_\allowbreak{}deletes} & 1 giờ \\
+\href{https://docs.getdbt.com/reference/snapshot-configs}{dbt: Snapshot configurations} & các tham số cấu hình & 0,5 giờ \\
+\href{https://docs.databricks.com/aws/en/lakehouse/medallion}{Databricks: Medallion} & mô hình ở lớp gold & 0,3 giờ \\
+\href{https://docs.databricks.com/aws/en/tables/constraints}{Databricks: Constraints} & khoá informational trên bảng lakehouse & 0,3 giờ \\
+\end{xltabular}
+
+\section{Khoá học miễn phí}
+
+\begin{itemize}
+  \item \href{https://www.coursera.org/professional-certificates/data-engineering}{DeepLearning.AI Data Engineering}, khoá 4 “Data Modeling, Transformation, and Serving” (32 giờ): audit miễn phí, không có chứng chỉ khi audit.
+  \item \href{https://github.com/DataTalksClub/data-engineering-zoomcamp}{DE Zoomcamp}, Module 3 Data Warehousing và Module 4 Analytics Engineering: miễn phí toàn bộ.
+\end{itemize}
+
+\section{Lab thực hành}
+
+Mọi lab chạy trên DuckDB 2.0.0 với CSV Olist ở \code{olist/}. Mỗi bảng có một câu grain viết trong comment ở đầu file SQL.
+
+\subsection{Lab 3.1: Bus matrix và grain}
+
+\begin{enumerate}
+  \item Liệt kê quy trình nghiệp vụ: đặt đơn và bán từng món, thanh toán, đánh giá, giao hàng.
+  \item Vẽ bus matrix: dòng là quy trình, cột là \code{dim\_\allowbreak{}date}, \code{dim\_\allowbreak{}customer}, \code{dim\_\allowbreak{}seller}, \code{dim\_\allowbreak{}product}, kiểu thanh toán, địa lý. Đánh dấu ô áp dụng.
+  \item Viết grain: \code{fact\_\allowbreak{}order\_\allowbreak{}items} có một dòng mỗi (\code{order\_\allowbreak{}id}, \code{order\_\allowbreak{}item\_\allowbreak{}id}); \code{fact\_\allowbreak{}payments} có một dòng mỗi (\code{order\_\allowbreak{}id}, \code{payment\_\allowbreak{}sequential}); mỗi dimension một câu.
+  \item Phân loại \code{price}, \code{freight\_\allowbreak{}value}, \code{payment\_\allowbreak{}value}, \code{payment\_\allowbreak{}installments}, \code{review\_\allowbreak{}score} thành cộng được, cộng được một phần hay không cộng được, kèm lý do.
+\end{enumerate}
+
+\hoanthanh{bus matrix có đủ bốn quy trình, mỗi bảng có một câu grain, và câu kiểm \code{count(*)} bằng số khoá grain đúng trên dữ liệu nguồn cho cả hai fact.}
+
+\subsection{Lab 3.2: Dựng star schema Olist}
+
+\begin{enumerate}
+  \item \code{dim\_\allowbreak{}date} từ 2016-01-01 tới 2018-12-31, khoá dạng \code{yyyymmdd}:
+\begin{codeblock}
+CREATE TABLE dim_date AS
+SELECT CAST(strftime(d, '%Y%m%d') AS INTEGER) AS date_key,
+       CAST(d AS DATE) AS date_day,
+       year(d) AS year, month(d) AS month,
+       dayofweek(d) AS day_of_week
+FROM generate_series(DATE '2016-01-01', DATE '2018-12-31', INTERVAL 1 DAY) t(d);
+\end{codeblock}
+  \item \code{dim\_\allowbreak{}customer}: một dòng mỗi \code{customer\_\allowbreak{}unique\_\allowbreak{}id}, khoá thay thế \code{customer\_\allowbreak{}key} sinh bằng \code{row\_\allowbreak{}number()}; thành phố và bang lấy từ đơn mới nhất (SCD loại 1). Thêm một dòng “unknown” với \code{customer\_\allowbreak{}key = 0}.
+  \item \code{dim\_\allowbreak{}product}, \code{dim\_\allowbreak{}seller}: khoá thay thế, khoá tự nhiên, dòng “unknown”. Đưa \code{product\_\allowbreak{}category\_\allowbreak{}name} NULL về giá trị hiển thị rõ ràng.
+  \item \code{fact\_\allowbreak{}order\_\allowbreak{}items}: join \code{items} với \code{orders}, tra \code{customer\_\allowbreak{}key} qua \code{customers.\allowbreak{}customer\_\allowbreak{}unique\_\allowbreak{}id}, tra \code{product\_\allowbreak{}key}, \code{seller\_\allowbreak{}key}, các khoá ngày đặt, duyệt, giao; giữ \code{order\_\allowbreak{}id} làm degenerate dimension; measure \code{price}, \code{freight\_\allowbreak{}value}.
+  \item \code{fact\_\allowbreak{}payments}: grain (\code{order\_\allowbreak{}id}, \code{payment\_\allowbreak{}sequential}), khoá ngày đặt và \code{customer\_\allowbreak{}key}, measure \code{payment\_\allowbreak{}value}.
+  \item Viết test bằng SQL: không trùng grain; không khoá ngoại mồ côi (mọi khoá trên fact có dòng ở dimension); tổng \code{price} ở fact bằng tổng ở nguồn.
+  \item Chứng minh lỗi nhân dòng: join \code{fact\_\allowbreak{}payments} với \code{fact\_\allowbreak{}order\_\allowbreak{}items} theo \code{order\_\allowbreak{}id} rồi cộng \code{payment\_\allowbreak{}value}, so với tổng trên riêng \code{fact\_\allowbreak{}payments}. Viết lại để gộp từng fact về grain đơn trước khi join.
+\end{enumerate}
+
+\hoanthanh{mọi test trả 0 dòng lỗi, số dòng \code{dim\_\allowbreak{}customer} (trừ dòng unknown) bằng số \code{customer\_\allowbreak{}unique\_\allowbreak{}id} khác nhau, và bạn có hai con số cho thấy tổng sau join sai lệch so với tổng đúng, cùng câu truy vấn đã sửa.}
+
+\subsection{Lab 3.3: SCD loại 2 cho người bán}
+
+Olist chỉ có một ảnh chụp của bảng sellers, nên bạn tự tạo thay đổi để luyện.
+
+\begin{enumerate}
+  \item Tạo \code{dim\_\allowbreak{}seller\_\allowbreak{}scd2} với cột \code{seller\_\allowbreak{}key} (khoá thay thế, mỗi version một giá trị), \code{seller\_\allowbreak{}id} (khoá bền), \code{seller\_\allowbreak{}city}, \code{seller\_\allowbreak{}state}, \code{valid\_\allowbreak{}from}, \code{valid\_\allowbreak{}to}, \code{is\_\allowbreak{}current}. Nạp lần đầu với \code{valid\_\allowbreak{}from = DATE '2016-01-01'}.
+  \item Tạo bảng \code{seller\_\allowbreak{}changes} gồm ba người bán đổi thành phố vào 2018-01-01, và một người bán mới.
+  \item Viết SCD loại 2 trong một transaction: đóng dòng hiện hành của người bán có thay đổi, rồi chèn version mới.
+\begin{codeblock}
+BEGIN;
+UPDATE dim_seller_scd2 d
+SET valid_to = c.change_date, is_current = false
+FROM seller_changes c
+WHERE d.seller_id = c.seller_id AND d.is_current
+  AND (d.seller_city IS DISTINCT FROM c.seller_city
+       OR d.seller_state IS DISTINCT FROM c.seller_state);
+INSERT INTO dim_seller_scd2
+SELECT (SELECT max(seller_key) FROM dim_seller_scd2)
+         + row_number() OVER (ORDER BY c.seller_id),
+       c.seller_id, c.seller_city, c.seller_state,
+       c.change_date, NULL, true
+FROM seller_changes c
+WHERE NOT EXISTS (SELECT 1 FROM dim_seller_scd2 d
+                  WHERE d.seller_id = c.seller_id AND d.is_current);
+COMMIT;
+\end{codeblock}
+  \item Chạy lại đúng khối trên lần thứ hai và kiểm số dòng không đổi.
+  \item Tra \code{seller\_\allowbreak{}key} cho \code{fact\_\allowbreak{}order\_\allowbreak{}items} theo ngày đặt đơn nằm trong \code{[valid\_\allowbreak{}from, valid\_\allowbreak{}to)}.
+  \item Đọc \href{https://docs.getdbt.com/docs/build/snapshots}{dbt: Snapshots} và ghi lại cột nào của bạn tương ứng với \code{dbt\_\allowbreak{}valid\_\allowbreak{}from}, \code{dbt\_\allowbreak{}valid\_\allowbreak{}to}, \code{dbt\_\allowbreak{}scd\_\allowbreak{}id}.
+\end{enumerate}
+
+\hoanthanh{mỗi \code{seller\_\allowbreak{}id} có đúng một dòng \code{is\_\allowbreak{}current}, ba người bán đổi thành phố có hai dòng không chồng khoảng hiệu lực, chạy lại lần hai không thêm dòng, và đơn đặt trước 2018-01-01 của họ trỏ tới version cũ.}
+
+\section{Kế hoạch theo tuần}
+
+\begin{xltabular}{\textwidth}{@{}P{1.4cm} L P{1.6cm}@{}}
+\toprule
+\thd{tuần} & \thd{việc} & \thd{giờ} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & Microsoft Learn star schema; Kimball PDF phần bốn bước, grain, loại fact, loại measure; Lab 3.1 & 10 \\
+2 & Kimball PDF phần khoá, date dimension, role-playing, degenerate, junk, conformed; Lab 3.2 & 10 \\
+3 & Kimball Type 2 và SCD trong PDF; dbt Snapshots; Databricks Medallion; Lab 3.3; thử thách kỹ năng & 10 \\
+thêm & Microsoft Fabric Dimensional modeling; khoá 4 DeepLearning.AI (audit); DE Zoomcamp Module 4 & 10 tới 20 \\
+\end{xltabular}
+
+\begin{thuthach}
+Không có hướng dẫn từng bước. Mở rộng star schema của Lab 3.2 với hai bảng: \code{fact\_\allowbreak{}order\_\allowbreak{}fulfillment} dạng accumulating snapshot (một dòng mỗi đơn, khoá ngày cho từng mốc, độ trễ giữa các mốc) và \code{fact\_\allowbreak{}reviews} (tự xác định grain sau khi kiểm xem \code{review\_\allowbreak{}id} có duy nhất trong dữ liệu không). Từ đó định nghĩa bốn KPI dưới dạng view: doanh thu (ghi rõ có tính phí vận chuyển hay không), giá trị đơn trung bình, tỉ lệ giao đúng hạn, tỉ lệ người mua quay lại theo \code{customer\_\allowbreak{}unique\_\allowbreak{}id}.
+\hoanthanh{mỗi bảng mới có câu grain và test không trùng grain; độ trễ không âm hoặc có giải thích; mỗi KPI có định nghĩa một câu, điều kiện lọc \code{order\_\allowbreak{}status}, và một test so với cách tính trực tiếp từ dữ liệu nguồn.}
+\end{thuthach}
+
+\section{Câu hỏi tự kiểm tra}
+
+\begin{enumerate}
+  \item Bốn bước thiết kế dimensional model là gì, và vì sao grain là bước then chốt?
+  \item Grain của \code{fact\_\allowbreak{}order\_\allowbreak{}items} và của \code{fact\_\allowbreak{}payments} là gì? Vì sao không gộp chúng vào một fact?
+  \item Kể bốn loại bảng fact. Loại nào hợp câu hỏi “mỗi bước giao hàng mất bao lâu”?
+  \item \code{price}, \code{payment\_\allowbreak{}installments}, \code{review\_\allowbreak{}score}: cái nào cộng được, cái nào không? Tính điểm review trung bình theo tháng đúng cách thế nào?
+  \item Vì sao KPI người mua quay lại tính theo \code{customer\_\allowbreak{}id} của Olist cho kết quả sai?
+  \item Khoá tự nhiên, khoá thay thế và khoá bền khác nhau thế nào trong một dimension SCD loại 2?
+  \item Người bán chuyển từ SP sang RJ: viết các dòng dimension sau thay đổi theo SCD loại 1, 2 và 3.
+  \item SCD loại 6 thêm gì so với loại 2?
+  \item Một món hàng tới với \code{seller\_\allowbreak{}id} chưa có trong \code{dim\_\allowbreak{}seller}: bạn ghi gì, và khi thông tin người bán tới thì làm gì?
+  \item Role-playing dimension là gì? Vì sao Microsoft khuyên tạo bảng ngày riêng cho mỗi vai trò trong Power BI?
+  \item Degenerate dimension và junk dimension khác nhau thế nào? Cho ví dụ trong Olist.
+  \item Chiến lược \code{timestamp} và \code{check} của dbt snapshots khác nhau thế nào? Khi nào dùng \code{check}?
+\end{enumerate}
+
+\section{Điểm dễ nhầm}
+
+\begin{xltabular}{\textwidth}{@{}P{3.8cm} L P{3.4cm}@{}}
+\toprule
+\thd{điểm dễ nhầm} & \thd{thực tế} & \thd{docs chính thức} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Nhiều người nghĩ grain là mức của báo cáo & Grain là nghĩa của một dòng fact, khai báo trước khi chọn dimension; bắt đầu từ atomic grain & \href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF} \\
+Gom items, payments, reviews vào một fact cho tiện & Các grain khác nhau không được trộn trong một fact; mỗi grain một bảng & \href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF} \\
+\code{customer\_\allowbreak{}id} của Olist là người mua & Nó gắn với đơn; người mua là \code{customer\_\allowbreak{}unique\_\allowbreak{}id}; kiểm bằng cách đếm giá trị khác nhau của hai cột & \href{https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce}{trang dữ liệu Olist}, Lab 1.2 \\
+Khoá thay thế lấy từ hệ nguồn & Theo định nghĩa, khoá thay thế không có trong dữ liệu nguồn; hệ phân tích tự cấp & \href{https://learn.microsoft.com/en-us/power-bi/guidance/star-schema}{Microsoft Learn: star schema} \\
+Dùng khoá tự nhiên làm khoá chính là đủ cho SCD loại 2 & Loại 2 tạo nhiều dòng cho một thực thể, nên khoá chính phải khác khoá tự nhiên hay khoá bền; mỗi version một khoá thay thế & \href{https://www.kimballgroup.com/data-warehouse-business-intelligence-resources/kimball-techniques/dimensional-modeling-techniques/type-2/}{Kimball: Type 2} \\
+SCD loại 2 là giữ mọi bản ghi thô & Loại 2 thêm dòng khi thuộc tính được theo dõi đổi, có ngày hiệu lực, ngày hết hiệu lực và cờ hiện hành; bản ghi thô thuộc tầng raw & \href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF}, \href{https://docs.getdbt.com/docs/build/snapshots}{dbt: Snapshots} \\
+Điểm trung bình cộng lại được qua các nhóm & Tỉ lệ và trung bình là measure không cộng được; tính lại từ tổng và số đếm & \href{https://www.kimballgroup.com/wp-content/uploads/2013/08/2013.09-Kimball-Dimensional-Modeling-Techniques11.pdf}{Kimball techniques, PDF} \\
+Factless fact vô dụng vì không có số & Nó ghi sự kiện các dimension gặp nhau, và làm bảng cầu cho quan hệ nhiều-nhiều & \href{https://learn.microsoft.com/en-us/power-bi/guidance/star-schema}{Microsoft Learn: star schema} \\
+Snowflake luôn tốt hơn vì chuẩn hoá & Với Power BI, Microsoft thấy một bảng dimension thường có lợi hơn nhiều bảng chuẩn hoá & \href{https://learn.microsoft.com/en-us/power-bi/guidance/star-schema}{Microsoft Learn: star schema} \\
+Có medallion thì không cần mô hình hoá & Medallion chia lớp theo chất lượng; dimensional model vẫn được dựng ở gold & \href{https://docs.databricks.com/aws/en/lakehouse/medallion}{Databricks: Medallion} \\
+\end{xltabular}

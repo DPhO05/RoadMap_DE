@@ -1,0 +1,190 @@
+\modulechapter{6}{Catalog, metadata và governance}
+\moduleinfo{Trung cấp}{15 giờ}{Module 5}
+
+Module 5 cho thấy catalog Iceberg chỉ giữ một con trỏ, nhưng con trỏ đó quyết định ai thấy phiên bản nào của bảng. Module này hỏi tiếp: ai được đổi con trỏ, ai được đọc file trên storage, dữ liệu đi từ đâu tới đâu (lineage), và khi một người yêu cầu xoá dữ liệu cá nhân thì dữ liệu thật sự biến mất lúc nào. Bạn sẽ gọi REST catalog API bằng \code{curl}, dựng RBAC trên Apache Polaris, phát sự kiện OpenLineage vào Marquez, và diễn tập xoá dữ liệu trên bảng Iceberg.
+
+\section{Bạn sẽ học được}
+\begin{itemize}
+  \item Phân biệt technical catalog (giữ con trỏ bảng, cho engine commit) với data catalog (để tìm, mô tả và quản trị dữ liệu).
+  \item Gọi các endpoint chính của Iceberg REST catalog và đọc \code{metadata-location} của một bảng.
+  \item Giải thích mô hình RBAC của Polaris và dựng một principal chỉ có quyền đọc.
+  \item So sánh ba cách cấp quyền đọc file: key tĩnh, vended credential, remote signing.
+  \item Mô tả row filter, column mask và giới hạn của RBAC ở mức catalog.
+  \item Phát sự kiện OpenLineage cho một job và xem đồ thị lineage trong Marquez.
+  \item Viết quy trình xoá dữ liệu cá nhân trên Iceberg đủ để dữ liệu biến mất khỏi storage.
+\end{itemize}
+
+\section{Nội dung chính}
+\begin{enumerate}
+  \item \textbf{Hai nghĩa của ``catalog''.} Technical catalog của Iceberg giữ con trỏ tới file metadata hiện tại và đổi nó nguyên tử khi commit (\href{https://iceberg.apache.org/spec/}{Iceberg spec}). Data catalog hay nền tảng metadata giúp người dùng tìm bảng, đọc mô tả, chủ sở hữu, lineage; nó không thay technical catalog trong đường commit.
+  \item \textbf{Iceberg REST catalog.} Đặc tả OpenAPI định nghĩa: \code{GET /v1/config} (server trả cấu hình mặc định, cấu hình ghi đè như \code{prefix}, và danh sách endpoint), namespace, table (load, create, \code{updateTable}), commit nhiều bảng qua \code{/v1/\{prefix\}/\allowbreak transactions/commit}, và lập kế hoạch scan phía server (\href{https://iceberg.apache.org/rest-catalog-spec/}{REST Catalog Spec}, \href{https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml}{OpenAPI}). Load table trả \code{metadata-location}, metadata và \code{config} cho client.
+  \item \textbf{Xác thực.} Server thường dùng OAuth2. Endpoint \code{/v1/oauth/tokens} trong đặc tả đã bị đánh dấu deprecated để gỡ bỏ; server có thể dùng identity provider bên ngoài. Polaris vẫn cấp token cho client qua \code{client\_id}, \code{client\_secret} và \code{scope = PRINCIPAL\_ROLE:ALL} (\href{https://polaris.apache.org/releases/1.1.0/getting-started/using-polaris/}{Polaris: Using Polaris}).
+  \item \textbf{Cấp quyền đọc file.} Có ba cách: (a) client giữ key S3 tĩnh, đi vòng được qua catalog; (b) vended credential: client gửi \code{X-Iceberg-Access-\allowbreak Delegation: vended-credentials} và catalog trả credential ngắn hạn theo quyền trên bảng; (c) remote signing: catalog ký từng request S3. Lakekeeper ghi rằng remote signing chỉ giữ client trong phạm vi bảng khi object store kiểm mọi phần của request đã ký, và khuyên vended credential cho một số storage như MinIO, SeaweedFS (\href{https://docs.lakekeeper.io/docs/nightly/storage/}{Lakekeeper: Storage}).
+  \item \textbf{Các catalog triển khai REST.}
+  \begin{itemize}
+    \item Apache Polaris: top-level project của Apache từ 02/2026. Quickstart chạy Polaris với metastore trong bộ nhớ và RustFS, không dành cho production (\href{https://polaris.apache.org/guides/quickstart/}{Polaris Quickstart}).
+    \item Lakekeeper: chọn authorizer OpenFGA hoặc Cedar (\href{https://docs.lakekeeper.io/docs/nightly/authorization/}{Lakekeeper: Authorization}).
+    \item AWS Glue Data Catalog: Iceberg REST endpoint dạng \code{https://glue.\allowbreak <region>.\allowbreak amazonaws.com/\allowbreak iceberg}, xác thực SigV4 với signing name \code{glue}, tham số \code{warehouse} là catalog ID (\href{https://docs.aws.amazon.com/glue/latest/dg/connect-glu-iceberg-rest.html}{AWS Glue: Iceberg REST endpoint}).
+    \item \code{apache/iceberg-rest-fixture}: chỉ để học và test.
+  \end{itemize}
+  \item \textbf{RBAC của Polaris.} Principal (người hoặc dịch vụ) được gán principal role; principal role được gán catalog role; privilege (ví dụ \code{CATALOG\_MANAGE\_CONTENT}, \code{TABLE\_READ\_DATA}, \code{TABLE\_WRITE\_DATA}) cấp cho catalog role trên một securable (catalog, namespace, table). Không cấp privilege thẳng cho principal role. \code{TABLE\_READ\_DATA} cho phép nhận credential đọc ngắn hạn. Polaris dặn không để password, token hay access key trong property của bảng hoặc view, vì ai đọc được property sẽ thấy (\href{https://polaris.apache.org/in-dev/unreleased/managing-security/access-control/}{Polaris: Role-Based Access Control}).
+  \item \textbf{Row filter và column mask.} Đây là kiểm soát ở mức dòng và cột, do engine hoặc nền tảng truy vấn thực thi. Ví dụ, Unity Catalog trên Databricks dùng SQL UDF: row filter trả boolean cho từng dòng lúc truy vấn, column mask trả giá trị gốc hoặc giá trị đã che; gắn bằng \code{ALTER TABLE ... SET ROW FILTER} và \code{ALTER COLUMN ... SET MASK} (\href{https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/}{Databricks: Row filters and column masks}). Lakekeeper ghi rằng OpenFGA và Cedar không biểu diễn được row filter hay column mask (\href{https://docs.lakekeeper.io/docs/nightly/authorization/}{Lakekeeper: Authorization}).
+  \item \textbf{Lineage với OpenLineage.} Mô hình gồm run, job, dataset và facet. Một run đi qua các trạng thái như \code{START}, \code{RUNNING}, \code{COMPLETE}, \code{FAIL}, \code{ABORT}; các sự kiện của cùng một run nối với nhau bằng \code{runId} (\href{https://openlineage.io/docs/spec/run-cycle/}{OpenLineage: Run Cycle}, \href{https://openlineage.io/getting-started/}{Getting Started}). Lineage cần bên phát (Spark listener, Airflow provider) và bên nhận như Marquez (\href{https://marquezproject.ai/docs/quickstart/}{Marquez Quickstart}).
+  \item \textbf{Xoá dữ liệu cá nhân trên Iceberg.} \code{DELETE} tạo snapshot mới, nhưng snapshot cũ, tag và branch vẫn trỏ tới file cũ. Muốn dữ liệu biến mất khỏi storage: (1) với merge-on-read, chạy \code{rewrite\_data\_files} để file gốc không còn được dùng; (2) xoá hoặc rút ngắn tuổi các tag, branch đang giữ snapshot cũ (nhánh \code{main} không hết hạn, các ref khác theo \code{max-ref-age-ms}); (3) \code{expire\_snapshots}; (4) \code{remove\_orphan\_files} cho file của job hỏng (\href{https://iceberg.apache.org/docs/latest/branching/}{Branching}, \href{https://iceberg.apache.org/docs/latest/spark-procedures/}{Spark Procedures}, \href{https://iceberg.apache.org/docs/latest/maintenance/}{Maintenance}). Lưu ý bound của cột trong manifest có thể chứa tiền tố của giá trị cá nhân (mặc định \code{truncate(16)}); với cột nhạy cảm, đặt metrics mode \code{none} qua \code{write.metadata.\allowbreak metrics.column.<cột>} (\href{https://iceberg.apache.org/docs/latest/configuration/}{Configuration}).
+\end{enumerate}
+
+\begin{ghichu}
+\textbf{Ghi chú pháp lý ở Việt Nam.} Luật Bảo vệ dữ liệu cá nhân số 91/2025/QH15 có hiệu lực từ 01/01/2026 và cho chủ thể dữ liệu quyền yêu cầu xoá (điều 4). Nghị định 356/2025/NĐ-CP hướng dẫn chi tiết, cũng có hiệu lực từ 01/01/2026; điều 5 khoản 4 yêu cầu phản hồi yêu cầu xoá trong 02 ngày làm việc và thực hiện trong 20 ngày (30 ngày nếu cần bên xử lý hoặc bên thứ ba, gia hạn một lần không quá 20 ngày). Xem văn bản trên \href{https://english.luatvietnam.vn/dan-su/law-on-personal-data-protection-law-no-91-2025-qh15-405135-d1.html}{LuatVietnam: Luật 91/2025/QH15} và \href{https://luatvietnam.vn/dan-su/nghi-dinh-356-2025-nd-cp-quy-dinh-chi-tiet-luat-bao-ve-du-lieu-ca-nhan-422896-d1.html}{LuatVietnam: Nghị định 356/2025}; đây là cơ sở dữ liệu pháp luật, khi cần trích dẫn chính thức hãy đối chiếu văn bản gốc trên Công báo. Quy trình xoá ở mục trên phải chạy xong trong các hạn này.
+\end{ghichu}
+
+\section{Bắt đầu}
+\begin{itemize}
+  \item \href{https://polaris.apache.org/guides/quickstart/}{Polaris Quickstart}: chạy Polaris cùng RustFS bằng Docker Compose, lấy credential từ \code{docker compose -p polaris-quickstart logs}.
+  \item \href{https://openlineage.io/getting-started/}{OpenLineage Getting Started}: dựng Marquez, gửi sự kiện \code{START} và \code{COMPLETE}, xem đồ thị.
+  \item \href{https://iceberg.apache.org/rest-catalog-spec/}{Iceberg REST Catalog Spec}: đọc danh sách endpoint trước khi gọi bằng \code{curl}.
+\end{itemize}
+
+\section{Tài liệu chính thức}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{1.8cm}@{}}
+\toprule
+\thd{tài liệu} & \thd{nội dung cần đọc} & \thd{thời lượng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://iceberg.apache.org/rest-catalog-spec/}{REST Catalog Spec} và \href{https://github.com/apache/iceberg/blob/main/open-api/rest-catalog-open-api.yaml}{OpenAPI} & \code{/v1/config}, namespace, table, \code{LoadTableResult}, \code{/transactions/commit}, header \code{X-Iceberg-Access-Delegation} & 2 giờ \\
+\href{https://polaris.apache.org/guides/quickstart/}{Polaris Quickstart} & dựng Polaris với RustFS & 1 giờ \\
+\href{https://polaris.apache.org/in-dev/unreleased/managing-security/access-control/}{Polaris: Role-Based Access Control} & RBAC model, privileges, ví dụ & 1,5 giờ \\
+\href{https://polaris.apache.org/releases/1.1.0/getting-started/using-polaris/}{Polaris: Using Polaris} và \href{https://polaris.apache.org/releases/1.4.1/command-line-interface/}{CLI} & tạo catalog, principal, role, grant; kết nối Spark và PyIceberg & 1 giờ \\
+\href{https://docs.lakekeeper.io/docs/nightly/authorization/}{Lakekeeper: Authorization} và \href{https://docs.lakekeeper.io/docs/nightly/storage/}{Storage} & authorizer, grant; vended credential và remote signing & 1,5 giờ \\
+\href{https://docs.aws.amazon.com/glue/latest/dg/connect-glu-iceberg-rest.html}{AWS Glue: Iceberg REST endpoint} & endpoint, SigV4, ánh xạ \code{prefix} & 0,5 giờ \\
+\href{https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/}{Databricks: Row filters and column masks} & khái niệm row filter, column mask, ABAC & 0,5 giờ \\
+\href{https://openlineage.io/getting-started/}{OpenLineage Getting Started} và \href{https://openlineage.io/docs/spec/run-cycle/}{Run Cycle} & run, job, dataset, trạng thái run & 1,5 giờ \\
+\href{https://marquezproject.ai/docs/quickstart/}{Marquez Quickstart} & chạy Marquez, API lineage, UI & 0,5 giờ \\
+\href{https://iceberg.apache.org/docs/latest/branching/}{Iceberg Branching} và \href{https://iceberg.apache.org/docs/latest/spark-procedures/}{Spark Procedures} & retention của ref; \code{expire\_snapshots}, \code{remove\_orphan\_files} & 1 giờ \\
+\end{xltabular}
+
+\section{Lab thực hành}
+Chuẩn bị: Polaris Quickstart đang chạy (nó có sẵn catalog \code{quickstart\_catalog} trên RustFS). Nạp bảng \code{olist.orders} và \code{olist.customers} vào catalog này bằng mã của Lab 5.1, với \code{uri = http://localhost:8181/api/catalog}, \code{warehouse = quickstart\_catalog}, \code{credential = <client\_id>:<client\_secret>}, \code{scope = PRINCIPAL\_ROLE:ALL}.
+
+\subsection{Lab 6.1: Gọi REST catalog bằng curl}
+\begin{enumerate}
+  \item Lấy token và cấu hình:
+\begin{codeblock}
+BASE=http://localhost:8181/api/catalog
+TOKEN=$(curl -s $BASE/v1/oauth/tokens \
+  -d grant_type=client_credentials -d client_id=$CLIENT_ID \
+  -d client_secret=$CLIENT_SECRET -d scope=PRINCIPAL_ROLE:ALL | jq -r .access_token)
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/v1/config?warehouse=quickstart_catalog" | jq
+\end{codeblock}
+  \item Đọc giá trị \code{prefix} trong \code{overrides}, rồi gọi tiếp:
+\begin{codeblock}
+curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/<prefix>/namespaces | jq
+curl -s -H "Authorization: Bearer $TOKEN" $BASE/v1/<prefix>/namespaces/olist/tables | jq
+curl -s -H "Authorization: Bearer $TOKEN" \
+  $BASE/v1/<prefix>/namespaces/olist/tables/orders | jq '."metadata-location", .config'
+curl -s -H "Authorization: Bearer $TOKEN" \
+  -H "X-Iceberg-Access-Delegation: vended-credentials" \
+  $BASE/v1/<prefix>/namespaces/olist/tables/orders | jq '.config, ."storage-credentials"'
+\end{codeblock}
+  \item So hai lần load table: lần nào có credential trong phản hồi? Mở console RustFS (cổng 9001) và tìm đúng file \code{metadata-location}.
+\end{enumerate}
+\hoanthanh{bạn có sơ đồ mọi đường giao tiếp trong lab (client tới Polaris, Polaris tới RustFS, client tới RustFS), mỗi đường ghi giao thức và loại credential, và chỉ ra được credential ngắn hạn trong phản hồi có header \code{vended-credentials}.}
+
+\subsection{Lab 6.2: Principal chỉ đọc trên Polaris}
+\begin{enumerate}
+  \item Dùng CLI \code{polaris} với credential gốc (\code{--client-id}, \code{--client-secret}):
+\begin{codeblock}
+polaris principals create olist_reader          # ghi lại client id/secret trả về
+polaris principal-roles create analyst
+polaris principal-roles grant --principal olist_reader analyst
+polaris catalog-roles create --catalog quickstart_catalog reader
+polaris catalog-roles grant --catalog quickstart_catalog --principal-role analyst reader
+polaris privileges catalog grant --catalog quickstart_catalog --catalog-role reader TABLE_READ_DATA
+\end{codeblock}
+  \item Kết nối PyIceberg bằng credential của \code{olist\_reader}, với header \code{X-Iceberg-Access-\allowbreak Delegation: vended-credentials}. Đọc \code{olist.orders} rồi thử \code{append} một dòng. Nếu không list được namespace, đọc trang RBAC để chọn thêm privilege cần thiết và ghi lại.
+  \item Thử cấp privilege thẳng cho principal role và ghi lại vì sao không làm được.
+\end{enumerate}
+\hoanthanh{\code{olist\_reader} đọc được bảng, lần \code{append} bị từ chối với lỗi phân quyền, và bạn vẽ được chuỗi principal $\rightarrow$ principal role $\rightarrow$ catalog role $\rightarrow$ privilege của lab.}
+
+\subsection{Lab 6.3: Lineage với OpenLineage và Marquez}
+\begin{enumerate}
+  \item Chạy Marquez theo Getting Started (\code{./docker/up.sh}); nếu cổng API trùng với dịch vụ khác của stack, đổi bằng \code{--api-port}. UI ở cổng 3000.
+  \item Gửi hai sự kiện cho job nạp orders, cùng một \code{runId} (sinh bằng \code{uuidgen}):
+\begin{codeblock}
+{"eventType": "START", "eventTime": "2026-11-02T10:00:00Z",
+ "run": {"runId": "<uuid>"},
+ "job": {"namespace": "olist-lab", "name": "load_orders"},
+ "inputs":  [{"namespace": "s3://lab", "name": "raw/olist_orders_dataset.csv"}],
+ "outputs": [{"namespace": "iceberg://quickstart_catalog", "name": "olist.orders"}],
+ "producer": "https://example.com/olist-lab",
+ "schemaURL": "https://openlineage.io/spec/2-0-2/OpenLineage.json#/definitions/RunEvent"}
+\end{codeblock}
+  Lưu thành \code{start.json} và gửi, rồi gửi bản \code{COMPLETE} với \code{eventTime} muộn hơn:
+\begin{codeblock}
+curl -X POST http://localhost:<api-port>/api/v1/lineage \
+  -H 'Content-Type: application/json' -d @start.json
+\end{codeblock}
+  \item Thêm job thứ hai \code{build\_customer\_orders} đọc \code{olist.orders} và \code{olist.customers}, ghi \code{olist.customer\_orders}. Xem đồ thị trong UI.
+  \item Tuỳ chọn: bật Spark listener theo \href{https://openlineage.io/docs/integrations/spark/configuration/usage}{OpenLineage Spark integration} và chạy lại một truy vấn của Lab 5.2.
+\end{enumerate}
+\hoanthanh{Marquez hiển thị đồ thị CSV $\rightarrow$ \code{olist.orders} $\rightarrow$ \code{olist.customer\_orders}, và run của \code{load\_orders} có trạng thái hoàn thành với hai sự kiện cùng \code{runId}.}
+
+\subsection{Lab 6.4: Diễn tập xoá dữ liệu cá nhân}
+\begin{enumerate}
+  \item Chọn một \code{customer\_id}. Tạo tag \code{before\_erasure} trên \code{olist.orders}, rồi \code{DELETE FROM ... WHERE customer\_id = '...'}.
+  \item Chứng minh dữ liệu vẫn đọc được: truy vấn \code{VERSION AS OF} snapshot cũ và qua tag.
+  \item Xoá tag (\code{ALTER TABLE ... DROP TAG before\_\allowbreak erasure}), chạy \code{rewrite\_data\_\allowbreak files} nếu bảng dùng merge-on-read, rồi \code{expire\_\allowbreak snapshots} với tham số \code{retain\_last => 1}, sau cùng \code{remove\_orphan\_\allowbreak files} (chạy \code{dry\_run} trước).
+  \item Liệt kê lại object của bảng trên RustFS, kiểm rằng data file cũ chứa dòng đó đã mất và time travel về snapshot cũ báo lỗi.
+\end{enumerate}
+\hoanthanh{bạn có một runbook xoá dữ liệu gồm các bước, lệnh và bằng chứng (danh sách file trước và sau), và nêu được bước nào phải thêm nếu bảng có branch khác hoặc cột chứa dữ liệu cá nhân có metrics trong manifest.}
+
+\section{Kế hoạch theo tuần}
+\begin{xltabular}{\textwidth}{@{}P{1.4cm} L P{1.4cm}@{}}
+\toprule
+\thd{tuần} & \thd{việc} & \thd{giờ} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & REST Catalog Spec; Polaris Quickstart, RBAC, Using Polaris; Lakekeeper Storage và Authorization; Lab 6.1, 6.2 & 10 \\
+2 (nửa tuần) & OpenLineage Getting Started, Run Cycle; Marquez; Lab 6.3, 6.4; thử thách kỹ năng; câu hỏi tự kiểm tra & 5 \\
+thêm & AWS Glue Iceberg REST endpoint; row filter và column mask; OpenLineage cho Airflow (\href{https://airflow.apache.org/docs/apache-airflow-providers-openlineage/stable/configurations-ref.html}{provider configuration}) & 5 \\
+\end{xltabular}
+
+\begin{thuthach}
+Một nhóm có ba vai trò: analyst chỉ đọc bảng marts, data engineer ghi bảng staging và marts, và một dịch vụ báo cáo chỉ đọc một bảng duy nhất. Hãy dựng mô hình quyền này trên Polaris cho các bảng Olist, cấp quyền đọc file bằng vended credential (không phát key RustFS tĩnh cho ai ngoài admin), và phát lineage cho pipeline staging $\rightarrow$ marts. Không có hướng dẫn từng bước.
+\hoanthanh{bạn trình bày được bảng principal, role, privilege; mỗi vai trò thử một thao tác được phép và một thao tác bị chặn với log lỗi; đồ thị lineage trong Marquez khớp với pipeline; và bạn chỉ ra được điều gì mô hình này vẫn không làm được (ví dụ che cột) cùng công cụ có thể bù.}
+\end{thuthach}
+
+\section{Câu hỏi tự kiểm tra}
+\begin{enumerate}
+  \item Catalog Iceberg lưu chính xác cái gì, và không lưu cái gì?
+  \item Technical catalog và data catalog khác nhau thế nào? Công cụ nào nằm trên đường commit?
+  \item Client gọi endpoint REST nào đầu tiên, và server trả gì ở đó để đổi hành vi client?
+  \item Trong Polaris, vì sao không cấp \code{TABLE\_READ\_DATA} thẳng cho principal role? Vẽ chuỗi cấp quyền.
+  \item Key S3 tĩnh dùng chung gây rủi ro gì mà vended credential gỡ được? Rủi ro nào còn lại?
+  \item Theo Lakekeeper, khi nào remote signing không giữ được client trong phạm vi bảng?
+  \item Row filter và column mask do thành phần nào thực thi, và vì sao RBAC của catalog không đủ?
+  \item Trong OpenLineage, cái gì nối sự kiện \code{COMPLETE} với sự kiện \code{START}? Lineage tự có hay cần bên phát?
+  \item Sau \code{DELETE} một khách hàng, liệt kê mọi nơi trong bảng Iceberg còn có thể giữ dữ liệu của họ.
+  \item Vì sao tag tạo trước khi xoá có thể làm quy trình xoá thất bại, và bạn kiểm điều đó thế nào?
+\end{enumerate}
+
+\section{Điểm dễ nhầm}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{3.2cm}@{}}
+\toprule
+\thd{điểm dễ nhầm} & \thd{thực tế} & \thd{docs chính thức} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Nhiều người nghĩ catalog giữ data hoặc file schema & Catalog giữ con trỏ tới file metadata hiện tại; metadata và data nằm trên storage & \href{https://iceberg.apache.org/spec/}{Iceberg spec} \\
+``REST fixture là catalog production nhẹ'' & \code{iceberg-rest-fixture} chỉ để học và test; quickstart của Polaris cũng ghi không dành cho production & \href{https://polaris.apache.org/guides/quickstart/}{Polaris Quickstart} \\
+``RBAC trên catalog cũng bảo vệ file'' & Ai giữ key S3 tĩnh đi vòng được qua catalog; vended credential được cấp theo quyền trên bảng & \href{https://polaris.apache.org/in-dev/unreleased/managing-security/access-control/}{Polaris RBAC} \\
+``RBAC của catalog có lọc dòng, che cột'' & OpenFGA và Cedar trong Lakekeeper không biểu diễn được; row filter và column mask do engine/nền tảng thực thi & \href{https://docs.lakekeeper.io/docs/nightly/authorization/}{Lakekeeper Authorization}, \href{https://docs.databricks.com/aws/en/data-governance/unity-catalog/filters-and-masks/}{Databricks} \\
+``Để secret S3 trong table property cũng được'' & Polaris dặn không để secret trong property vì ai đọc property sẽ thấy & \href{https://polaris.apache.org/in-dev/unreleased/managing-security/access-control/}{Polaris RBAC} \\
+``\code{DELETE FROM} là đã xoá dữ liệu cá nhân'' & Snapshot, tag, branch cũ còn giữ file tới khi expire và dọn file & \href{https://iceberg.apache.org/docs/latest/branching/}{Branching}, \href{https://iceberg.apache.org/docs/latest/maintenance/}{Maintenance} \\
+``Công cụ lineage tự tìm ra lineage'' & OpenLineage cần bên phát như Spark listener hay Airflow provider & \href{https://openlineage.io/getting-started/}{OpenLineage} \\
+``Glue chỉ nói được giao thức riêng của AWS'' & Glue Data Catalog có Iceberg REST endpoint chuẩn, xác thực SigV4 & \href{https://docs.aws.amazon.com/glue/latest/dg/connect-glu-iceberg-rest.html}{AWS Glue} \\
+\end{xltabular}

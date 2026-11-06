@@ -1,0 +1,180 @@
+\modulechapter{9}{Orchestration với Apache Airflow}
+\moduleinfo{Trung cấp}{20 giờ}{Module 8}
+
+Pipeline ở Module 8 cần chạy theo lịch, theo đúng thứ tự, có retry, có giới hạn đồng thời, và báo khi hỏng. Đó là việc của orchestrator. Apache Airflow lên lịch và theo dõi các task; phần tính toán nặng vẫn chạy ở Spark. Module này dạy Airflow 3, bản có nhiều thay đổi phá vỡ so với tutorial Airflow 2 trên mạng. Học xong, bạn có ba DAG nối raw, staging và marts của Olist bằng asset, có pool giới hạn số job ghi Iceberg cùng lúc.
+
+\section{Bạn sẽ học được}
+\begin{itemize}
+  \item Mô tả các thành phần của Airflow 3 và việc mỗi thành phần làm.
+  \item Viết DAG bằng TaskFlow với import từ \code{airflow.sdk}.
+  \item Giải thích \code{logical\_date} và data interval dưới \code{CronTrigger\allowbreak Timetable} mặc định, và chọn timetable phù hợp.
+  \item Dùng retry, pool và \code{max\_active\_runs} để chạy an toàn.
+  \item Nối DAG bằng asset thay vì đoán giờ chạy.
+  \item Viết test cho DAG và phát hiện code kiểu Airflow 2 đã hỏng.
+\end{itemize}
+
+\section{Nội dung chính}
+\begin{enumerate}
+  \item \textbf{Orchestrator làm gì.} Airflow lên lịch, chạy theo phụ thuộc, retry và ghi log. Docs của Astronomer khuyên chuyển job xử lý dữ liệu lớn sang framework chuyên dụng như Spark, thay vì chạy trong worker của Airflow (\href{https://www.astronomer.io/docs/airflow/dag-best-practices}{Astronomer: DAG best practices}).
+  \item \textbf{Kiến trúc Airflow 3.} Scheduler, \code{dag-processor}, \code{api-server}, triggerer, executor với worker, và metadata DB. Từ Airflow 3, \code{airflow api-server} thay webserver, \code{airflow dag-processor} phải chạy riêng kể cả ở local, và code của task không được dùng session metadata DB trực tiếp (\href{https://airflow.apache.org/docs/apache-airflow/stable/installation/upgrading_to_airflow3.html}{Upgrading to Airflow 3}).
+  \item \textbf{DAG, task, operator, TaskFlow.} DAG là tập task và phụ thuộc. TaskFlow viết task bằng hàm Python với \code{@dag} và \code{@task}. Import mới nằm ở \code{airflow.sdk}; đường import cũ bị deprecate và sẽ bị bỏ (\href{https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dags.html}{Dags}, \href{https://airflow.apache.org/docs/apache-airflow/stable/tutorial/taskflow.html}{TaskFlow tutorial}).
+  \item \textbf{Lịch chạy với chuỗi cron.} Trong Airflow 3, \code{create\_cron\_\allowbreak data\_intervals} mặc định là \code{False}, nên chuỗi cron trần dùng \code{CronTrigger\allowbreak Timetable}: run chạy đúng giờ cron, \code{logical\_date} là thời điểm kích hoạt, \code{data\_interval\_start} và \code{data\_interval\_end} đều bằng thời điểm đó. \code{CronData\allowbreak IntervalTimetable} (mặc định của Airflow 2) tạo khoảng giữa hai mốc cron và chạy ở cuối khoảng. Ví dụ \code{0 0 * * *} bật lúc 15 giờ ngày 31/01: timetable trigger tạo run lúc nửa đêm 01/02; timetable data interval tạo run ngay cho khoảng bắt đầu nửa đêm 31/01 (\href{https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/timetable.html}{Timetables}).
+  \item \textbf{Ghim timetable.} Đổi cấu hình \code{create\_cron\_\allowbreak data\_intervals} làm đổi mọi DAG dùng chuỗi cron trần; nếu task cần data interval, khai báo tường minh một instance timetable. \code{CronTrigger\allowbreak Timetable} có tham số \code{interval} để có data interval kết thúc tại giờ kích hoạt (\href{https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/timetable.html}{Timetables}).
+  \item \textbf{Catchup và run trigger tay.} \code{catchup\_by\_default} giờ là \code{False}. Với run trigger tay, data interval có thể không khớp \code{logical\_date} bạn nhập; cần ngày người dùng chọn thì đọc thẳng \code{logical\_date} (\href{https://airflow.apache.org/docs/apache-airflow/stable/installation/upgrading_to_airflow3.html}{Upgrading to Airflow 3}).
+  \item \textbf{Context và template.} Các khoá \code{execution\_date}, \code{prev\_ds}, \code{next\_ds}, \code{yesterday\_ds}, \code{tomorrow\_ds} đã bị bỏ; \code{xcom\_pull()} không truyền \code{task\_ids} giờ chỉ kéo từ task hiện tại (\href{https://airflow.apache.org/docs/apache-airflow/stable/installation/upgrading_to_airflow3.html}{Upgrading to Airflow 3}).
+  \item \textbf{Retry và idempotency.} Airflow có thể retry task khi lỗi, nên task phải cho cùng kết quả mỗi lần chạy lại (\href{https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html}{Best Practices}). Astronomer gợi ý \code{retries=2} cho phần lớn lỗi thường gặp của hệ phân tán, và mỗi task chỉ làm một việc chạy lại được độc lập (\href{https://www.astronomer.io/docs/airflow/dag-best-practices}{Astronomer}).
+  \item \textbf{Đồng thời: pool.} Pool giới hạn số task chạy song song trên một tập task tuỳ ý. Task không gán pool rơi vào \code{default\_pool} có 128 slot; mỗi task chiếm 1 slot, đổi bằng \code{pool\_slots}; pool có tuỳ chọn tính cả task deferred (\href{https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/pools.html}{Pools}). Kết hợp với \code{max\_active\_runs} của DAG để hai run không chồng nhau.
+  \item \textbf{XCom.} XCom dành cho metadata nhỏ giữa các task, không phải để truyền DataFrame; trạng thái bền như high-water mark nên nằm ở bảng của bạn (\href{https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/xcoms.html}{XComs}).
+  \item \textbf{Sensor và deferrable operator.} Sensor chờ một điều kiện. Operator deferrable nhường slot worker trong lúc chờ và giao việc chờ cho triggerer (\href{https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/deferring.html}{Deferrable Operators \& Triggers}).
+  \item \textbf{Asset.} Asset là nhóm dữ liệu logic định danh bằng URI. Task khai báo \code{outlets} để phát sự kiện cho asset; DAG khác đặt \code{schedule} theo asset để chạy khi asset được cập nhật. Airflow không kiểm nội dung hay vị trí dữ liệu, URI chỉ là chuỗi. Decorator \code{@asset} tạo asset, DAG và task cùng lúc (\href{https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/assets.html}{Assets}).
+  \item \textbf{Deadline Alerts thay SLA.} SLA đã bị bỏ trong Airflow 3. Deadline Alerts có từ 3.1, còn ở mức experimental, cần ba tham số \code{reference}, \code{interval}, \code{callback}; ví dụ reference là \code{DAGRUN\_QUEUED\_AT}, \code{DAGRUN\_LOGICAL\_DATE}, \code{FIXED\_DATETIME} (\href{https://airflow.apache.org/docs/apache-airflow/stable/howto/deadline-alerts.html}{Deadline Alerts}).
+  \item \textbf{REST API.} \code{/api/v1} được thay bằng \code{/api/v2} (\href{https://airflow.apache.org/docs/apache-airflow/stable/installation/upgrading_to_airflow3.html}{Upgrading to Airflow 3}).
+  \item \textbf{Test DAG.} Docs chia thành Dag Loader Test, unit test, self-check và môi trường staging; tránh code nặng ở mức đầu file vì nó chạy mỗi lần DAG được parse (\href{https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html}{Best Practices}). Ruff 0.13.1 trở lên với rule \code{AIR301}, \code{AIR302} bắt các thay đổi phá vỡ của Airflow 3.
+  \item \textbf{Triển khai.} Docker Compose chính thức chỉ để học và khám phá, cần ít nhất 4 GB bộ nhớ cho Docker, tốt nhất 8 GB; production dùng \href{https://airflow.apache.org/docs/helm-chart/stable/index.html}{Helm Chart} (\href{https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html}{Running Airflow in Docker}).
+\end{enumerate}
+
+\section{Bắt đầu}
+\begin{itemize}
+  \item \href{https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html}{Running Airflow in Docker}: dựng Airflow 3 bằng Docker Compose chính thức.
+  \item \href{https://airflow.apache.org/docs/apache-airflow/stable/tutorial/taskflow.html}{TaskFlow tutorial}: viết DAG đầu tiên.
+  \item \href{https://airflow.apache.org/docs/apache-airflow/stable/installation/upgrading_to_airflow3.html}{Upgrading to Airflow 3}: đọc trước khi mở bất kỳ tutorial Airflow 2 nào.
+\end{itemize}
+
+\section{Tài liệu chính thức}
+\begin{xltabular}{\textwidth}{@{}P{4.6cm} L P{1.8cm}@{}}
+\toprule
+\thd{tài liệu} & \thd{nội dung cần đọc} & \thd{thời lượng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/index.html}{Airflow: Core Concepts} & Dags, Dag Runs, Tasks, Operators, XComs & 3 giờ \\
+\href{https://airflow.apache.org/docs/apache-airflow/stable/installation/upgrading_to_airflow3.html}{Upgrading to Airflow 3} & toàn trang & 1 giờ \\
+\href{https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/timetable.html}{Timetables}, \href{https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/cron.html}{Cron} & so sánh hai timetable cron, \code{interval}, \code{MultipleCron\allowbreak TriggerTimetable} & 1 giờ \\
+\href{https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/assets.html}{Assets} & outlets, lịch theo asset, \code{@asset} & 1 giờ \\
+\href{https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/pools.html}{Pools} & \code{default\_pool}, \code{pool}, \code{pool\_slots} & 0,5 giờ \\
+\href{https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/deferring.html}{Deferrable Operators \& Triggers} & triggerer, vì sao tiết kiệm slot worker & 0,5 giờ \\
+\href{https://airflow.apache.org/docs/apache-airflow/stable/howto/deadline-alerts.html}{Deadline Alerts} & reference, interval, callback & 0,5 giờ \\
+\href{https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html}{Best Practices} & Creating a task, Top level Python Code, Testing a Dag & 1,5 giờ \\
+\href{https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/backfill.html}{Backfill} & tạo backfill, chạy thử & 0,5 giờ \\
+\href{https://www.astronomer.io/docs/airflow/dag-best-practices}{Astronomer: DAG best practices} & Review idempotency, Set retries, Keep tasks atomic, Avoid top-level code & 1 giờ \\
+\end{xltabular}
+
+\section{Khoá học miễn phí}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{2.6cm}@{}}
+\toprule
+\thd{khoá} & \thd{nội dung} & \thd{miễn phí} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://academy.astronomer.io}{Astronomer Academy} & các module ngắn như Airflow: Taskflow API, Airflow: Dynamic Task Mapping, Airflow: Dynamic DAGs; lộ trình Airflow 101 (Airflow 3) & các module có nhãn Free; kiểm giá của lộ trình khi đăng ký \\
+\href{https://academy.astronomer.io}{Chứng chỉ Astronomer cho Airflow 3} & kỳ thi chứng chỉ Airflow; ôn bằng Airflow 101 & không miễn phí: 150 USD mỗi lần thi theo trang Academy ngày 02/11/2026 \\
+\end{xltabular}
+
+\section{Lab thực hành}
+
+\subsection{Lab 9.1: Airflow local và ngữ nghĩa lịch chạy}
+\begin{enumerate}
+  \item Dựng Airflow theo Docker Compose chính thức, cấp ít nhất 4 GB (tốt nhất 8 GB) bộ nhớ cho Docker; nối nó vào cùng network với Spark của stack tham chiếu.
+  \item Viết DAG \code{schedule\_probe} với \code{schedule="*/10 * * * *"}; task in ra \code{logical\_date}, \code{data\_interval\_start}, \code{data\_interval\_end}.
+  \item Viết bản thứ hai với \code{schedule=\allowbreak CronData\allowbreak IntervalTimetable(\allowbreak "*/10 * * * *", \allowbreak timezone="UTC")}, rồi so log của hai DAG. Trigger tay một run và so thêm lần nữa.
+  \item Chạy \code{ruff check dags/ -{}-select AIR301,AIR302} và sửa mọi cảnh báo.
+\end{enumerate}
+\hoanthanh{bạn có bảng so sánh ba giá trị thời gian của hai DAG ở run theo lịch và run trigger tay, và giải thích được khác biệt.}
+
+\subsection{Lab 9.2: ba DAG Olist nối bằng asset}
+Viết ba DAG: \code{olist\_raw} nạp CSV và bảng PostgreSQL vào tầng raw; \code{olist\_staging} chạy pipeline tăng dần của Module 8; \code{olist\_marts} tính mart doanh thu. DAG đầu chạy theo cron, hai DAG sau chạy theo asset. Task gọi Spark qua Spark Connect, Airflow chỉ điều phối.
+\begin{codeblock}
+import pendulum
+from airflow.sdk import Asset, dag, task
+
+RAW_ORDERS = Asset("s3://lakehouse/raw/olist_orders")
+STG_ORDERS = Asset("s3://lakehouse/staging/olist_orders")
+
+@dag(schedule="0 2 * * *", start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
+     catchup=False, max_active_runs=1, tags=["olist"])
+def olist_raw():
+    @task(outlets=[RAW_ORDERS], pool="lakehouse_writers", retries=2)
+    def load_raw_orders():
+        ...  # mở SparkSession.builder.remote(...) và ghi lake.raw.orders
+    load_raw_orders()
+
+@dag(schedule=[RAW_ORDERS], start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
+     catchup=False, max_active_runs=1, tags=["olist"])
+def olist_staging():
+    @task(outlets=[STG_ORDERS], pool="lakehouse_writers", retries=2)
+    def merge_orders():
+        ...  # pipeline tăng dần + MERGE của Lab 8.2
+    merge_orders()
+
+olist_raw()
+olist_staging()
+\end{codeblock}
+\hoanthanh{một run của \code{olist\_raw} tự kích hoạt \code{olist\_staging} rồi \code{olist\_marts}, thấy được trong giao diện asset, và cả ba DAG xanh.}
+
+\subsection{Lab 9.3: pool, retry và chạy lại an toàn}
+\begin{enumerate}
+  \item Tạo pool \code{lakehouse\_writers} 1 slot trong giao diện (Admin, Pools) và gán mọi task ghi Iceberg vào pool này.
+  \item Trigger tay \code{olist\_raw} và một job bảo trì Iceberg (ví dụ task gọi \code{rewrite\_data\_files}) cùng lúc; xác nhận trên giao diện rằng chỉ một task ghi chạy tại một thời điểm.
+  \item Cho task \code{merge\_orders} lỗi ngẫu nhiên sau khi \code{MERGE} commit nhưng trước khi ghi \code{hwm}; để retry chạy và kiểm không có dòng trùng.
+  \item Tạo backfill cho \code{olist\_raw} trên ba ngày bằng cơ chế backfill của Airflow 3, và xác nhận số dòng không nhân đôi.
+\end{enumerate}
+\hoanthanh{log cho thấy các task ghi chạy nối tiếp, và sau retry cùng backfill số dòng staging vẫn khớp nguồn.}
+
+\subsection{Lab 9.4: test DAG}
+\begin{enumerate}
+  \item Viết test pytest kiểm mỗi DAG: import không lỗi, có \code{tags}, mọi task có \code{retries} và task ghi Iceberg nằm trong pool \code{lakehouse\_writers}.
+  \item Chạy \code{dag.test()} cho \code{olist\_marts} ở local.
+  \item Thêm một DAG cố ý dùng \code{execution\_date} và import cũ; xác nhận Ruff với \code{AIR301}, \code{AIR302} bắt được.
+\end{enumerate}
+\hoanthanh{lệnh pytest và Ruff chạy xanh trên ba DAG thật và đỏ trên DAG cố ý sai.}
+
+\section{Kế hoạch theo tuần}
+\begin{xltabular}{\textwidth}{@{}P{1.4cm} L P{1.4cm}@{}}
+\toprule
+\thd{tuần} & \thd{việc} & \thd{giờ} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & Upgrading to Airflow 3, Core Concepts, TaskFlow tutorial, Timetables, Docker Compose; Lab 9.1 và 9.2 & 10 \\
+2 & Assets, Pools, Deferring, Deadline Alerts, Backfill, Best Practices, Astronomer best practices; Lab 9.3 và 9.4; thử thách kỹ năng & 10 \\
+thêm & các module Free của Astronomer Academy; lộ trình Airflow 101 nếu ôn chứng chỉ & 6 \\
+\end{xltabular}
+
+\begin{thuthach}
+Thêm vào hệ ba DAG một nhánh cho \code{order\_reviews}: nạp vào raw, \code{MERGE} vào staging, rồi cập nhật một mart điểm đánh giá trung bình theo bang. Mart chỉ được chạy khi cả staging orders và staging reviews đều đã cập nhật. Thêm một Deadline Alert báo khi DAG marts chưa xong sau 2 giờ kể từ khi run được xếp hàng. Không được dùng sensor chờ theo giờ.
+\hoanthanh{một run trọn vẹn từ raw tới mart reviews chạy tự động theo asset, cảnh báo deadline kích hoạt được khi bạn cố ý làm chậm một task, và test của Lab 9.4 vẫn xanh.}
+\end{thuthach}
+
+\section{Câu hỏi tự kiểm tra}
+\begin{enumerate}
+  \item Kể các thành phần của Airflow 3 và việc của từng thành phần.
+  \item Với \code{schedule="0 0 * * *"} trong Airflow 3, \code{logical\_date} và \code{data\_interval\_start} là gì? Lấy lại hành vi Airflow 2 bằng cách nào?
+  \item Vì sao nên khai báo timetable tường minh thay vì dựa vào \code{create\_cron\_\allowbreak data\_intervals}?
+  \item Vì sao task phải idempotent trước khi bật retry?
+  \item Hai cấu hình nào bảo đảm hai job ghi cùng một bảng Iceberg không chạy chồng nhau?
+  \item Cái gì nên để trong XCom, cái gì không?
+  \item Triggerer làm gì, và vì sao operator deferrable tiết kiệm slot worker?
+  \item Asset có di chuyển hay kiểm tra dữ liệu không? Nó cho bạn gì?
+  \item Vì sao code nặng ở mức đầu file DAG gây hại?
+  \item Thứ gì thay SLA trong Airflow 3, và cần những tham số nào?
+\end{enumerate}
+
+\section{Điểm dễ nhầm}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{3.4cm}@{}}
+\toprule
+\thd{điểm dễ nhầm} & \thd{thực tế} & \thd{docs chính thức} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Nhiều người nghĩ Airflow xử lý dữ liệu & Airflow điều phối; job xử lý lớn nên chạy ở framework chuyên dụng & \href{https://www.astronomer.io/docs/airflow/dag-best-practices}{Astronomer} \\
+\code{logical\_date} luôn là đầu một data interval như Airflow 2 & Với chuỗi cron trần, Airflow 3 dùng \code{CronTrigger\allowbreak Timetable}: \code{logical\_date} là thời điểm kích hoạt và data interval có độ dài bằng 0 & \href{https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/timetable.html}{Timetables} \\
+Catchup bật mặc định & \code{catchup\_by\_default} là \code{False} trong Airflow 3 & \href{https://airflow.apache.org/docs/apache-airflow/stable/installation/upgrading_to_airflow3.html}{Upgrading to Airflow 3} \\
+Tutorial Airflow 2 vẫn chạy & Khoá context như \code{execution\_date}, SLA, \code{/api/v1} và nhiều đường import đã bị bỏ hoặc deprecate & \href{https://airflow.apache.org/docs/apache-airflow/stable/installation/upgrading_to_airflow3.html}{Upgrading to Airflow 3} \\
+XCom truyền được DataFrame & XCom dành cho metadata nhỏ & \href{https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/xcoms.html}{XComs} \\
+Asset kiểm dữ liệu đã thật sự có & Airflow không giả định gì về nội dung hay vị trí dữ liệu; asset là tín hiệu lên lịch & \href{https://airflow.apache.org/docs/apache-airflow/stable/authoring-and-scheduling/assets.html}{Assets} \\
+Docker Compose dùng được cho production & Docs ghi nó chỉ để học và khám phá; production dùng Helm Chart & \href{https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html}{Running Airflow in Docker} \\
+\end{xltabular}

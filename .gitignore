@@ -1,0 +1,7 @@
+# Bản nháp, file sinh ra và cấu hình cục bộ, không đưa lên repo
+drafts/
+backup/
+build/
+research_notes/
+.claude/
+.DS_Store

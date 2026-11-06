@@ -1,0 +1,216 @@
+\modulechapter{12}{Streaming: Kafka và Flink}
+\moduleinfo{Nâng cao}{30 giờ}{Module 5, 7, 8}
+
+Pipeline batch xử lý dữ liệu theo đợt; streaming xử lý từng sự kiện khi nó tới. Module này dạy hai công cụ phổ biến nhất: Apache Kafka làm log sự kiện bền vững, và Apache Flink làm bộ xử lý luồng có trạng thái. Bạn sẽ đẩy sự kiện đơn hàng Olist vào Kafka, tính tổng theo cửa sổ thời gian bằng Flink SQL dựa trên event time và watermark, ghi kết quả vào Iceberg, rồi khởi động lại job để kiểm exactly-once. Học xong, bạn giải thích đúng Kafka bảo đảm gì, Flink bảo đảm gì, và chi phí của việc ghi lakehouse từ luồng.
+
+\section{Bạn sẽ học được}
+\begin{itemize}
+  \item Giải thích topic, partition, offset, consumer group và phạm vi bảo đảm thứ tự của Kafka.
+  \item Phân biệt at-most-once, at-least-once, exactly-once, và biết idempotent producer, transaction, \code{read\_committed} làm gì.
+  \item Phân biệt event time với processing time và giải thích watermark của Flink.
+  \item Viết truy vấn Flink SQL dùng window TVF trên luồng Kafka.
+  \item Giải thích checkpoint của Flink và cách sink Iceberg dựa vào nó để đạt exactly-once.
+  \item Ước lượng số snapshot và file mà một luồng ghi Iceberg sinh ra, và chọn việc bảo trì bảng.
+\end{itemize}
+
+\section{Nội dung chính}
+
+\subsection{Kafka}
+\begin{enumerate}
+  \item \textbf{Topic, partition, offset.} Topic được chia thành các partition có thứ tự hoàn toàn (``totally ordered''); Kafka không bảo đảm thứ tự giữa các partition. Message có cùng key đi vào cùng partition nên giữ thứ tự theo key. Vị trí của consumer trong mỗi partition chỉ là một số nguyên (offset), và consumer có thể chủ động tua lại offset cũ để đọc lại (\href{https://kafka.apache.org/44/design/design/}{Kafka 4.4 Design}).
+  \item \textbf{Message không bị xoá khi đã đọc.} Kafka giữ message theo cấu hình retention; mục ``Constant Time Suffices'' của trang Design giải thích vì sao giữ lâu không làm chậm hệ thống. Log compaction giữ ít nhất giá trị cuối cùng của mỗi key, hợp với topic ``trạng thái hiện tại'' (\href{https://kafka.apache.org/44/design/design/}{Kafka 4.4 Design}).
+  \item \textbf{Consumer group.} Mỗi partition, tại một thời điểm, được đúng một consumer trong mỗi group đọc. Giao thức consumer group mới (KIP-848) GA từ Kafka 4.0, bật sẵn phía server; client chọn bằng \code{group.protocol=consumer} (\href{https://kafka.apache.org/blog/2025/03/18/apache-kafka-4.0.0-release-announcement/}{Kafka 4.0 announcement}).
+  \item \textbf{Share group.} Share group là một loại group khác, chạy song song với consumer group: nhiều consumer cùng đọc và một partition có thể giao cho nhiều consumer, record được acknowledge riêng lẻ (\href{https://kafka.apache.org/44/design/design/}{Kafka 4.4 Design}, mục ``The Share Consumer''). Tính năng ở dạng early access trong 4.0 và được công bố production-ready từ 4.2 (\href{https://kafka.apache.org/blog/2026/02/17/apache-kafka-4.2.0-release-announcement/}{Kafka 4.2 announcement}).
+  \item \textbf{Replication.} Leader theo dõi tập replica đồng bộ (ISR); với \code{min.insync.replicas}, partition chỉ nhận ghi khi ISR đủ lớn. Từ 0.11.0.0, mặc định Kafka chờ một replica nhất quán thay vì bầu leader ``unclean'' (\href{https://kafka.apache.org/44/design/design/}{Kafka 4.4 Design}).
+  \item \textbf{Chỉ còn KRaft.} Kafka 4.0 là bản lớn đầu tiên chạy hoàn toàn không cần ZooKeeper (\href{https://kafka.apache.org/blog/2025/03/18/apache-kafka-4.0.0-release-announcement/}{Kafka 4.0 announcement}). Tài liệu và video cũ có bước cài ZooKeeper không còn áp dụng. Bản mới nhất là 4.4.0 (\href{https://kafka.apache.org/blog/2026/10/22/apache-kafka-4.4.0-release-announcement/}{Kafka 4.4.0 announcement}).
+  \item \textbf{Ngữ nghĩa giao nhận.} At-most-once: có thể mất, không lặp. At-least-once: không mất, có thể lặp. Exactly-once: mỗi message được xử lý đúng một lần. Idempotent producer (từ 0.11.0.0) bảo đảm gửi lại không tạo bản trùng trong log; transaction ghi nhiều message theo kiểu tất cả hoặc không; consumer \code{isolation.\allowbreak level=\allowbreak read\_committed} chỉ trả message của transaction đã commit. Exactly-once sang hệ đích khác ``generally requires cooperation with such systems'' (\href{https://kafka.apache.org/44/design/design/}{Kafka 4.4 Design}, mục ``Message Delivery Semantics'', ``Using Transactions'').
+  \item \textbf{Hệ tương thích Kafka API (tuỳ chọn).} Redpanda là broker nói Kafka API nhưng là implementation riêng; kiểm tính năng cần dùng trên \href{https://docs.redpanda.com/}{Redpanda docs} trước khi thay thế.
+\end{enumerate}
+
+\subsection{Flink}
+\begin{enumerate}[resume]
+  \item \textbf{Xử lý luồng có trạng thái.} Flink giữ state cho từng key (ví dụ tổng doanh thu của cửa sổ đang mở) và chụp state định kỳ bằng checkpoint để phục hồi khi lỗi (\href{https://nightlies.apache.org/flink/flink-docs-stable/docs/learn-flink/fault_tolerance/}{Learn Flink: Fault Tolerance}).
+  \item \textbf{Event time và processing time.} Processing time là giờ máy khi sự kiện được xử lý; event time là thời điểm sự kiện xảy ra, nằm trong chính bản ghi. Phân tích dựa trên event time cho cùng kết quả khi phát lại dữ liệu cũ (\href{https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/}{Timely Stream Processing}).
+  \item \textbf{Watermark.} Watermark với thời điểm \code{t} khẳng định luồng đã tới event time \code{t}, tức không còn chờ sự kiện cũ hơn \code{t}. Sự kiện tới sau watermark là sự kiện trễ; watermark là heuristic nên vẫn có thể có dữ liệu trễ. Với nhiều luồng vào song song, watermark của toán tử là giá trị nhỏ nhất của các luồng vào (\href{https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/}{Timely Stream Processing}). Trong Flink SQL, khai báo bằng \code{WATERMARK FOR ts AS ts - INTERVAL '5' SECOND} trong \code{CREATE TABLE}.
+  \item \textbf{Window TVF.} Flink SQL có các window table-valued function \code{TUMBLE}, \code{HOP}, \code{CUMULATE}, \code{SESSION}; kết quả có cột \code{window\_start}, \code{window\_end}, rồi \code{GROUP BY window\_start, window\_end} (\href{https://nightlies.apache.org/flink/flink-docs-stable/docs/sql/reference/queries/window-agg/}{Window Aggregation}).
+  \item \textbf{Checkpoint và exactly-once đầu cuối.} Khi lỗi, Flink khôi phục state và vị trí đọc nguồn từ checkpoint gần nhất. Để kết quả ở hệ đích không bị trùng, sink phải hợp tác: commit theo checkpoint (giao dịch) hoặc ghi idempotent. Sink Iceberg của Flink commit data file khi checkpoint hoàn tất, nên khoảng checkpoint quyết định độ tươi dữ liệu và số snapshot (\href{https://iceberg.apache.org/docs/latest/flink/}{Iceberg: Flink}, \href{https://iceberg.apache.org/docs/latest/flink-writes/}{Flink writes}).
+  \item \textbf{Phiên bản.} Flink 2.3.0 là bản stable (25/06/2026), nhưng Flink Kafka connector mới nhất 5.0.0 ghi hỗ trợ Flink 2.1.x và 2.2.x (\href{https://flink.apache.org/downloads/}{Flink downloads}). Trước khi dựng lab, chọn một bản Flink mà cả Kafka connector và Iceberg Flink runtime cùng hỗ trợ (\href{https://iceberg.apache.org/multi-engine-support/}{Iceberg multi-engine support}).
+\end{enumerate}
+
+\subsection{Ghi lakehouse từ luồng}
+\begin{enumerate}[resume]
+  \item \textbf{Hai đường ghi Iceberg.} Sink Flink (ghi từ job xử lý) và Iceberg Kafka Connect sink (chép topic vào bảng, có control topic để điều phối commit tập trung) (\href{https://iceberg.apache.org/docs/latest/kafka-connect/}{Iceberg Kafka Connect}).
+  \item \textbf{Khoảng commit và số file.} Kafka Connect sink mặc định commit mỗi 5 phút (\code{iceberg.\allowbreak control.\allowbreak commit.\allowbreak interval-ms} = 300000), tức 288 commit mỗi ngày cho mỗi bảng (\href{https://iceberg.apache.org/docs/latest/kafka-connect/}{Iceberg Kafka Connect}). Mỗi commit thêm một snapshot và file mới, nên bảng ghi từ luồng cần compaction và expire snapshot định kỳ (\href{https://iceberg.apache.org/docs/latest/maintenance/}{Iceberg Maintenance}).
+  \item \textbf{Khi nào cần streaming.} Nếu nguồn chỉ có dữ liệu theo đợt (ví dụ API kéo 15 phút một lần), streaming thường chỉ thêm độ phức tạp. Streaming đáng giá khi nguồn tự đẩy sự kiện và người dùng cần kết quả trong vài giây tới vài phút.
+\end{enumerate}
+
+\section{Bắt đầu}
+\begin{enumerate}
+  \item Đọc phần Introduction và Quickstart trong \href{https://kafka.apache.org/documentation/}{Kafka docs}, chạy một broker KRaft một node bằng image Docker chính thức \code{apache/kafka}, ghim bản \code{4.4.0}.
+  \item Đọc \href{https://nightlies.apache.org/flink/flink-docs-stable/docs/learn-flink/overview/}{Learn Flink: Overview}.
+  \item Làm \href{https://iceberg.apache.org/flink-quickstart/}{Flink and Iceberg Quickstart} của Iceberg để có Flink SQL ghi được bảng Iceberg.
+\end{enumerate}
+
+\section{Tài liệu chính thức}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{1.8cm}@{}}
+\toprule
+\thd{tài liệu} & \thd{nội dung cần đọc} & \thd{thời lượng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://kafka.apache.org/documentation/}{Kafka docs} & Introduction, Quickstart, Kafka Connect & 2 giờ \\
+\href{https://kafka.apache.org/44/design/design/}{Kafka 4.4: Design} & The Consumer, Message Delivery Semantics, Using Transactions, The Share Consumer, Replication, Log Compaction & 3 giờ \\
+\href{https://kafka.apache.org/blog/2025/03/18/apache-kafka-4.0.0-release-announcement/}{Kafka 4.0}, \href{https://kafka.apache.org/blog/2026/10/22/apache-kafka-4.4.0-release-announcement/}{4.4.0 announcement} & bỏ ZooKeeper, KIP-848, thay đổi mới nhất & 0,5 giờ \\
+\href{https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/}{Flink: Timely Stream Processing} & event time, watermark, lateness & 1,5 giờ \\
+\href{https://nightlies.apache.org/flink/flink-docs-stable/docs/learn-flink/fault_tolerance/}{Flink: Fault Tolerance} & state backend, checkpoint, savepoint, exactly-once & 1,5 giờ \\
+\href{https://nightlies.apache.org/flink/flink-docs-stable/docs/sql/reference/queries/window-agg/}{Flink SQL: Window Aggregation} & window TVF, \code{GROUP BY window\_start, window\_end} & 1 giờ \\
+\href{https://iceberg.apache.org/docs/latest/flink/}{Iceberg: Flink}, \href{https://iceberg.apache.org/docs/latest/flink-writes/}{Flink writes} & tạo catalog, ghi từ Flink SQL, upsert, bảo trì sau commit & 1,5 giờ \\
+\href{https://iceberg.apache.org/docs/latest/kafka-connect/}{Iceberg Kafka Connect} & features, control topic, cấu hình commit & 1 giờ \\
+\href{https://iceberg.apache.org/docs/latest/maintenance/}{Iceberg Maintenance} & expire snapshots, rewrite data files & 0,5 giờ \\
+\href{https://flink.apache.org/downloads/}{Flink downloads} & bản Flink và connector tương thích & 0,25 giờ \\
+\end{xltabular}
+
+\section{Khoá học miễn phí}
+\begin{itemize}
+  \item \href{https://developer.confluent.io/courses/}{Confluent Developer courses}: các khoá nhập môn miễn phí như Apache Kafka 101 và Apache Flink 101. Một số bài dùng dịch vụ Confluent Cloud; phần khái niệm áp dụng cho Kafka và Flink mã nguồn mở.
+  \item \href{https://github.com/DataTalksClub/data-engineering-zoomcamp}{DE Zoomcamp}: module streaming (module 7) miễn phí, có bài thực hành Kafka.
+  \item \href{https://github.com/apache/flink-training}{apache/flink-training}: bài tập chính thức của dự án Flink, viết bằng Java, dùng nhánh khớp bản Flink bạn chạy.
+\end{itemize}
+
+\section{Lab thực hành}
+
+\subsection{Lab 1: Sự kiện đơn hàng Olist vào Kafka}
+\begin{enumerate}
+  \item Chạy broker \code{apache/\allowbreak kafka:4.4.0} một node (trong image, các script nằm ở \code{/opt/\allowbreak kafka/\allowbreak bin}). Tạo topic \code{olist.orders} với 3 partition bằng \code{kafka-topics.sh --create}.
+  \item Viết producer Python: ghép \code{orders} với \code{order\_payments} (DuckDB là đủ), sắp theo \code{order\_\allowbreak purchase\_\allowbreak timestamp}, gửi mỗi đơn thành một message JSON gồm \code{order\_id}, \code{customer\_id}, \code{order\_status}, \code{payment\_value}, \code{event\_time}; key là \code{customer\_id}.
+  \item Chạy hai consumer cùng group; dùng \code{kafka-consumer-\allowbreak groups.sh --describe} xem partition giao cho ai và lag.
+  \item Dừng consumer, chạy \code{kafka-consumer-\allowbreak groups.sh --reset-offsets --to-earliest --execute} rồi đọc lại.
+\end{enumerate}
+\hoanthanh{Bạn chỉ ra được mọi message của một \code{customer\_id} nằm cùng một partition theo đúng thứ tự gửi, và đọc lại được toàn bộ topic sau khi reset offset.}
+
+\subsection{Lab 2: Lặp, mất và transaction}
+\begin{enumerate}
+  \item Viết vòng consume, transform, produce đọc \code{olist.orders} và ghi \code{olist.orders\_enriched}; bản đầu dùng auto-commit offset.
+  \item Giết tiến trình giữa chừng nhiều lần; đếm bản trùng và bản thiếu ở topic đích so với nguồn.
+  \item Bản hai: producer có \code{transactional.id}, gửi offset của consumer trong cùng transaction; consumer kiểm tra đọc với \code{isolation.\allowbreak level=\allowbreak read\_committed}.
+\end{enumerate}
+\hoanthanh{Bảng so sánh hai bản: số message trùng, số message thiếu, và một câu giải thích vì sao bản transaction không trùng khi đọc bằng \code{read\_committed}.}
+
+\subsection{Lab 3: Cửa sổ theo event time bằng Flink SQL}
+\begin{enumerate}
+  \item Chọn bản Flink có Kafka connector và Iceberg runtime tương thích (xem mục Phiên bản); chạy JobManager, TaskManager và SQL Client bằng Docker.
+  \item Khai báo bảng nguồn có watermark và chạy tổng theo ngày (dữ liệu Olist trải 2016--2018, nên dùng cửa sổ 1 ngày trên event time gốc):
+\end{enumerate}
+\begin{codeblock}
+CREATE TABLE orders_events (
+  order_id      STRING,
+  customer_id   STRING,
+  order_status  STRING,
+  payment_value DECIMAL(12, 2),
+  event_time    TIMESTAMP(3),
+  WATERMARK FOR event_time AS event_time - INTERVAL '5' SECOND
+) WITH (
+  'connector' = 'kafka',
+  'topic' = 'olist.orders',
+  'properties.bootstrap.servers' = 'kafka:9092',
+  'properties.group.id' = 'flink-orders',
+  'scan.startup.mode' = 'earliest-offset',
+  'format' = 'json'
+);
+
+SELECT window_start, window_end, COUNT(*) AS orders, SUM(payment_value) AS revenue
+FROM TABLE(TUMBLE(TABLE orders_events, DESCRIPTOR(event_time), INTERVAL '1' DAY))
+GROUP BY window_start, window_end;
+\end{codeblock}
+\begin{enumerate}[resume]
+  \item Gửi thêm vài sự kiện có \code{event\_time} lùi 2 giây và lùi 2 ngày so với sự kiện mới nhất; ghi lại sự kiện nào được tính vào cửa sổ, sự kiện nào bị bỏ.
+\end{enumerate}
+\hoanthanh{Tổng số đơn và doanh thu của một ngày bất kỳ đã đóng cửa sổ khớp với kết quả DuckDB tính trực tiếp từ CSV, và bạn giải thích được số phận của từng sự kiện trễ.}
+
+\subsection{Lab 4: Ghi Iceberg và kiểm exactly-once khi khởi động lại}
+\begin{enumerate}
+  \item Tạo catalog Iceberg trong Flink SQL trỏ vào REST catalog của stack:
+\end{enumerate}
+\begin{codeblock}
+SET 'execution.checkpointing.interval' = '30s';
+
+CREATE CATALOG lake WITH (
+  'type' = 'iceberg',
+  'catalog-type' = 'rest',
+  'uri' = 'http://iceberg-rest:8181',
+  'warehouse' = 's3://warehouse/',
+  'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
+  's3.endpoint' = 'http://rustfs:9000',
+  's3.path-style-access' = 'true'
+);
+
+CREATE DATABASE IF NOT EXISTS lake.streaming;
+CREATE TABLE IF NOT EXISTS lake.streaming.daily_revenue (
+  window_start TIMESTAMP(3), window_end TIMESTAMP(3),
+  orders BIGINT, revenue DECIMAL(18, 2));
+
+INSERT INTO lake.streaming.daily_revenue
+SELECT window_start, window_end, COUNT(*), SUM(payment_value)
+FROM TABLE(TUMBLE(TABLE default_catalog.default_database.orders_events,
+                  DESCRIPTOR(event_time), INTERVAL '1' DAY))
+GROUP BY window_start, window_end;
+\end{codeblock}
+\begin{enumerate}[resume]
+  \item Cho producer gửi chậm (ví dụ 50 đơn mỗi giây). Sau vài checkpoint, \code{docker kill} container TaskManager rồi chạy lại nó; theo dõi trên Web UI việc job khôi phục từ checkpoint.
+  \item Khi producer gửi xong và watermark đã qua ngày cuối, đọc bảng bằng Trino hoặc DuckDB: kiểm không có \code{window\_start} nào xuất hiện hai lần, và tổng \code{orders} bằng số đơn trong CSV (trừ các ngày chưa đóng cửa sổ).
+  \item Đếm snapshot qua bảng metadata \code{\$snapshots}; tính số snapshot mỗi ngày nếu checkpoint mỗi 30 giây, và chạy expire snapshot theo Iceberg Maintenance.
+\end{enumerate}
+\hoanthanh{Sau ít nhất một lần giết TaskManager, bảng Iceberg không có cửa sổ trùng và tổng số đơn khớp nguồn; bạn nêu được số snapshot đã sinh và lệnh bảo trì đã chạy.}
+
+\section{Kế hoạch theo tuần}
+\begin{xltabular}{\textwidth}{@{}P{1.6cm} L P{1.8cm}@{}}
+\toprule
+\thd{tuần} & \thd{việc} & \thd{giờ} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & Kafka docs Introduction, Quickstart; Kafka 4.4 Design các mục The Consumer, Replication, Log Compaction; Lab 1 & 10 \\
+2 & Design: Message Delivery Semantics, Using Transactions, The Share Consumer; Flink Timely Stream Processing, Window Aggregation; Lab 2, Lab 3 & 10 \\
+3 & Flink Fault Tolerance; Iceberg Flink, Flink writes, Kafka Connect, Maintenance; Lab 4 và thử thách kỹ năng & 10 \\
+thêm & Iceberg Kafka Connect sink chép \code{olist.orders} vào bảng raw; Redpanda thay broker; flink-training; Confluent và Zoomcamp & 10 trở lên \\
+\end{xltabular}
+
+\begin{thuthach}
+Đội vận hành muốn biết gần như ngay lập tức khi tỉ lệ đơn bị huỷ của một bang vượt 5\% trong cửa sổ trượt 1 ngày, bước 1 giờ. Tự thiết kế topic và key, truy vấn Flink SQL (gợi ý: \code{HOP}), độ trễ watermark, cách xử lý sự kiện trễ, bảng Iceberg nhận kết quả, khoảng checkpoint, và lịch bảo trì bảng. Chạy trên dữ liệu Olist phát lại.
+\hoanthanh{Job chạy liên tục, chịu được một lần khởi động lại mà không ghi trùng, và bạn trình bày được các bang vượt ngưỡng cùng lý do chọn từng tham số (độ trễ watermark, khoảng checkpoint, lịch compaction).}
+\end{thuthach}
+
+\section{Câu hỏi tự kiểm tra}
+\begin{enumerate}
+  \item Vì sao Kafka bảo đảm thứ tự trong một partition mà không bảo đảm trong cả topic? Key giúp gì?
+  \item Consumer group lưu cái gì để biết đã đọc tới đâu? Điều gì xảy ra với message đã xử lý nhưng chưa commit offset khi tiến trình chết?
+  \item Share group khác consumer group ở điểm nào? Khi nào bạn chọn nó?
+  \item Retention và compaction: cái nào hợp với topic chứa trạng thái mới nhất của mỗi khách hàng?
+  \item Idempotent producer bảo đảm gì, và transaction thêm gì?
+  \item Vì sao exactly-once bên trong Kafka không tự áp sang PostgreSQL hay Iceberg?
+  \item Cho một ví dụ trên dữ liệu Olist mà event time và processing time lệch nhau nhiều ngày.
+  \item Watermark tại \code{2017-11-24 00:00} khẳng định điều gì? Vì sao sự kiện cũ hơn vẫn có thể tới?
+  \item Checkpoint của Flink chứa gì, và sink Iceberg dùng nó thế nào để tránh ghi trùng?
+  \item Với khoảng commit mặc định của Iceberg Kafka Connect sink, mỗi bảng có bao nhiêu snapshot mỗi ngày? Cần bảo trì gì?
+  \item Vì sao phải kiểm bảng tương thích phiên bản trước khi chọn bản Flink cho lab?
+\end{enumerate}
+
+\section{Điểm dễ nhầm}
+\begin{xltabular}{\textwidth}{@{}P{4.0cm} L P{3.2cm}@{}}
+\toprule
+\thd{điểm dễ nhầm} & \thd{thực tế} & \thd{docs chính thức} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Nhiều người nghĩ Kafka xoá message khi đã đọc & Message ở lại tới khi retention hay compaction bỏ; consumer chỉ dời offset và có thể tua lại & \href{https://kafka.apache.org/44/design/design/}{Kafka Design} \\
+Topic có thứ tự toàn cục & Thứ tự chỉ đúng trong một partition & \href{https://kafka.apache.org/44/design/design/}{Kafka Design} \\
+Kafka cần ZooKeeper & Từ 4.0, Kafka chạy hoàn toàn bằng KRaft & \href{https://kafka.apache.org/blog/2025/03/18/apache-kafka-4.0.0-release-announcement/}{Kafka 4.0} \\
+Exactly-once đầu cuối tự có khi bật transaction & Exactly-once sang hệ khác cần hệ đích hợp tác: commit theo checkpoint hoặc ghi idempotent & \href{https://kafka.apache.org/44/design/design/}{Kafka Design} \\
+Watermark bảo đảm không còn dữ liệu trễ & Watermark là ước lượng tiến độ event time; vẫn cần chính sách cho sự kiện trễ & \href{https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/}{Flink time} \\
+Window theo processing time là đủ cho báo cáo & Kết quả khi đó phụ thuộc lúc dữ liệu tới; phát lại cho kết quả khác & \href{https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/}{Flink time} \\
+Ghi Iceberg từ luồng mỗi vài giây không sao & Mỗi commit thêm snapshot và file; cần compaction và expire snapshot & \href{https://iceberg.apache.org/docs/latest/maintenance/}{Iceberg Maintenance} \\
+Bản Flink mới nhất luôn dùng được với mọi connector & Kafka connector 5.0.0 ghi hỗ trợ Flink 2.1.x và 2.2.x; kiểm trước khi nâng & \href{https://flink.apache.org/downloads/}{Flink downloads} \\
+\end{xltabular}

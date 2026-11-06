@@ -1,0 +1,222 @@
+\modulechapter{10}{Chất lượng dữ liệu, test và DataOps}
+\moduleinfo{Trung cấp}{20 giờ}{Module 8, 9}
+
+Một pipeline chạy xanh vẫn có thể ghi dữ liệu sai. Module này thêm các lớp phòng vệ: unit test cho logic biến đổi, data test cho dữ liệu thật, contract cho hình dạng bảng, và write-audit-publish (WAP) để dữ liệu chưa kiểm không bao giờ tới người đọc. Bên cạnh đó là các thói quen DataOps: Git, pre-commit và CI. Học xong, bạn có cổng chất lượng chặn marts khi staging sai, và một CI tự chạy test mỗi lần đẩy code.
+
+\section{Bạn sẽ học được}
+\begin{itemize}
+  \item Phân biệt unit test, data test, contract và test đầu cuối, và đặt mỗi loại đúng chỗ.
+  \item Viết các kiểm tra unique, not null, accepted values và relationships cho bảng core.
+  \item Làm WAP trên một branch Iceberg và publish bằng \code{fast\_forward}.
+  \item Viết unit test PySpark bằng pytest và chạy chúng trong GitHub Actions.
+  \item Chọn công cụ chất lượng dữ liệu, có xét license và tình trạng dự án năm 2026.
+  \item Mô tả một data contract theo Open Data Contract Standard.
+\end{itemize}
+
+\section{Nội dung chính}
+
+\subsection{Các loại kiểm tra}
+\begin{enumerate}
+  \item \textbf{Bốn loại kiểm tra.} Unit test kiểm logic trên đầu vào tĩnh, trước khi build. Data test kiểm nội dung dữ liệu thật sau khi build. Contract kiểm hình dạng đầu ra (tên cột, kiểu, ràng buộc) ngay lúc build. Test đầu cuối chạy cả pipeline trên môi trường giống thật (\href{https://docs.getdbt.com/docs/build/unit-tests}{dbt unit tests}, \href{https://docs.getdbt.com/docs/mesh/govern/model-contracts}{dbt model contracts}).
+  \item \textbf{Các chiều chất lượng.} GX chia use case thành Distribution, Freshness, Integrity, Missingness, Schema, Uniqueness, Volume và Unstructured; dùng làm từ vựng khi thiết kế kiểm tra (\href{https://docs.greatexpectations.io/docs/reference/learn/data_quality_use_cases/dq_use_cases_lp/}{GX: data quality use cases}).
+  \item \textbf{Data test kiểu dbt.} dbt có bốn generic test dựng sẵn: \code{unique}, \code{not\_null}, \code{accepted\_values}, \code{relationships}; khai báo dưới khoá \code{data\_tests}. Ngoài ra có singular test (một câu SQL trả về dòng lỗi), mức \code{severity}, và \code{store\_failures} để lưu dòng lỗi (\href{https://docs.getdbt.com/docs/build/data-tests}{dbt data tests}). Dù không dùng dbt, đây là mô hình tốt: mỗi test là một truy vấn trả về dòng vi phạm, rỗng nghĩa là qua.
+  \item \textbf{Unit test của dbt.} Có từ dbt 1.8; dbt Labs khuyên chỉ chạy unit test ở môi trường dev và CI, vì đầu vào là tĩnh, không cần chạy lại trên production (\href{https://docs.getdbt.com/docs/build/unit-tests}{dbt unit tests}).
+  \item \textbf{Model contract của dbt.} Đặt \code{contract: enforced: true}, rồi khai báo \code{name} và \code{data\_type} cho mọi cột. dbt chạy preflight check so tên và kiểu cột; không khớp thì model không build. Ràng buộc phụ thuộc nền tảng: phần lớn chỉ thực thi \code{not\_null}, còn \code{primary\_key}, \code{unique}, \code{foreign\_key} chỉ được khai báo. Contract hỗ trợ \code{table}, \code{view} và \code{incremental} (với \code{on\_schema\_change} là \code{append\_new\_columns} hoặc \code{fail}), không hỗ trợ \code{ephemeral} hay Python model (\href{https://docs.getdbt.com/docs/mesh/govern/model-contracts}{dbt model contracts}).
+\end{enumerate}
+
+\subsection{Write-audit-publish trên Iceberg}
+\begin{enumerate}[resume]
+  \item \textbf{WAP.} Ghi dữ liệu mới vào một branch, kiểm trên branch đó, rồi mới publish lên \code{main}. Trước khi publish, người đọc \code{main} không thấy dữ liệu của branch (\href{https://iceberg.apache.org/docs/latest/branching/}{Iceberg Branching}).
+  \item \textbf{Cách làm trong Spark.} Bật thuộc tính bảng \code{write.wap.enabled}, tạo branch bằng \code{ALTER TABLE ... CREATE BRANCH}, đặt \code{spark.wap.branch} rồi ghi vào tên bảng gốc; branch phải có sẵn, và không được vừa đặt \code{spark.wap.branch} vừa dùng định danh \code{branch\_<tên>} trong cùng lệnh ghi (\href{https://iceberg.apache.org/docs/latest/spark-writes/}{Iceberg Spark Writes}, \href{https://iceberg.apache.org/docs/latest/spark-ddl/}{Iceberg Spark DDL}).
+  \item \textbf{Publish.} \code{CALL <catalog>.system.\allowbreak fast\_forward('<bảng>', 'main', '<branch>')} đưa \code{main} tới snapshot mới nhất của branch; \code{cherrypick\_snapshot} là cách khác để publish một snapshot cụ thể (\href{https://iceberg.apache.org/docs/latest/spark-procedures/}{Iceberg Spark Procedures}).
+\end{enumerate}
+
+\subsection{Công cụ chất lượng dữ liệu năm 2026}
+\begin{enumerate}[resume]
+  \item \textbf{GX Core.} Thư viện Python mã nguồn mở, license Apache-2.0. Ngày 06/05/2026, Great Expectations thông báo FICO mua GX Cloud, còn Fivetran trở thành bên chăm sóc cộng đồng mã nguồn mở và dự án GX Core (\href{https://www.greatexpectations.io/blog/an-update-from-great-expectations}{GX blog}, \href{https://www.fivetran.com/press/fivetran-to-become-steward-of-the-great-expectations-open-source-community-and-gx-core-project}{thông cáo của Fivetran}). Mã nguồn và bản phát hành nằm ở \href{https://github.com/fivetran/great_expectations/releases}{\code{fivetran/\allowbreak great\_expectations}}.
+  \item \textbf{Soda Core.} Soda đổi license Soda Core từ Apache 2.0 sang Elastic License 2.0 (bài ngày 27/01/2026). Theo Soda, bạn vẫn dùng tự do trong tổ chức, kể cả production; điều bị cấm là cung cấp Soda Core cho bên thứ ba dưới dạng dịch vụ hosted hoặc managed (\href{https://soda.io/blog/soda-core-license-update-moving-to-elastic-license}{Soda: license update}). Kiểm license của đúng phiên bản bạn cài.
+  \item \textbf{Bắt đầu rẻ nhất.} Với lab này, kiểm tra bằng Spark SQL ngay trong WAP là đủ; thêm thư viện khi số kiểm tra tăng hoặc cần báo cáo đẹp hơn.
+\end{enumerate}
+
+\subsection{DataOps: Git, pre-commit, CI}
+\begin{enumerate}[resume]
+  \item \textbf{Git.} Commit nhỏ, branch cho mỗi thay đổi, merge qua pull request. Pro Git là sách chính thức trên git-scm.com, đọc miễn phí (\href{https://git-scm.com/book/en/v2}{Pro Git}).
+  \item \textbf{Lint và pre-commit.} pre-commit chạy hook (như Ruff) trước mỗi commit để lỗi bị chặn sớm (\href{https://pre-commit.com/}{pre-commit}, \href{https://docs.astral.sh/ruff/}{Ruff}).
+  \item \textbf{Unit test PySpark.} pytest dùng fixture để tạo \code{SparkSession} dùng chung (\href{https://docs.pytest.org/en/stable/how-to/fixtures.html}{pytest fixtures}); PySpark có \code{pyspark.testing.\allowbreak assertDataFrameEqual} để so DataFrame (\href{https://spark.apache.org/docs/latest/api/python/getting_started/testing_pyspark.html}{Testing PySpark}).
+  \item \textbf{CI với GitHub Actions.} Workflow chạy trên mỗi push và pull request: cài Python, cache dependency, chạy Ruff và pytest (\href{https://docs.github.com/en/actions/tutorials/build-and-test-code/python}{GitHub Actions: Python}). Test cần nhiều dịch vụ Docker (Spark Connect, catalog, RustFS) thường chạy ở máy hoặc workflow chạy tay.
+  \item \textbf{Data contract.} Open Data Contract Standard (ODCS) là chuẩn trung lập về nhà cung cấp để mô tả data contract bằng YAML: schema, quan hệ, quy tắc chất lượng, SLA, kênh hỗ trợ. ODCS thuộc dự án Bitol, ở mức incubation trong LF AI \& Data; v3.1.0 ra tháng 12/2025 (\href{https://bitol.io/bitol-announces-odcs-v3-1-0-stronger-smarter-and-stricter/}{Bitol: ODCS v3.1.0}, \href{https://bitol-io.github.io/open-data-contract-standard/v3.1.0/}{ODCS docs}).
+  \item \textbf{Quan sát pipeline.} Airflow phát metric qua StatsD hoặc OpenTelemetry, ví dụ thời gian DAG run và số task lỗi; đó là điểm bắt đầu cho dashboard và cảnh báo (\href{https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/metrics.html}{Airflow Metrics}).
+\end{enumerate}
+
+\section{Bắt đầu}
+\begin{itemize}
+  \item \href{https://docs.getdbt.com/docs/build/data-tests}{dbt: Add data tests}: đọc để có mô hình bốn generic test.
+  \item \href{https://spark.apache.org/docs/latest/api/python/getting_started/testing_pyspark.html}{Testing PySpark}: chạy ví dụ dùng pytest.
+  \item \href{https://docs.github.com/en/actions/tutorials/build-and-test-code/python}{GitHub Actions: Building and testing Python}: tạo workflow đầu tiên.
+\end{itemize}
+
+\section{Tài liệu chính thức}
+\begin{xltabular}{\textwidth}{@{}P{4.6cm} L P{1.8cm}@{}}
+\toprule
+\thd{tài liệu} & \thd{nội dung cần đọc} & \thd{thời lượng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://docs.getdbt.com/docs/build/data-tests}{dbt: data tests}, \href{https://docs.getdbt.com/reference/resource-properties/data-tests}{data\_tests property} & generic và singular test, \code{severity}, \code{store\_failures} & 1,5 giờ \\
+\href{https://docs.getdbt.com/docs/build/unit-tests}{dbt: unit tests} & khi nào chạy, đầu vào tĩnh & 1 giờ \\
+\href{https://docs.getdbt.com/docs/mesh/govern/model-contracts}{dbt: model contracts} & preflight check, ràng buộc theo nền tảng, contract và data test khác nhau & 1 giờ \\
+\href{https://docs.greatexpectations.io/docs/reference/learn/data_quality_use_cases/dq_use_cases_lp/}{GX: data quality use cases} & tám use case & 1 giờ \\
+\href{https://docs.greatexpectations.io/docs/core/introduction/try_gx/}{GX Core: Try GX} & quickstart với pandas & 1 giờ \\
+\href{https://iceberg.apache.org/docs/latest/branching/}{Iceberg: Branching and Tagging} & mục Audit Branch & 0,5 giờ \\
+\href{https://iceberg.apache.org/docs/latest/spark-procedures/}{Iceberg: Spark Procedures} & \code{fast\_forward}, \code{cherrypick\_snapshot} & 0,5 giờ \\
+\href{https://git-scm.com/book/en/v2}{Pro Git} & chương 1 tới 3 & 5 giờ \\
+\href{https://pre-commit.com/}{pre-commit} & cài đặt, file cấu hình, chạy trên mọi file & 0,5 giờ \\
+\href{https://docs.pytest.org/en/stable/how-to/fixtures.html}{pytest: fixtures} & scope, yield fixture, \code{conftest.py} & 1 giờ \\
+\href{https://spark.apache.org/docs/latest/api/python/getting_started/testing_pyspark.html}{Testing PySpark} & \code{assertDataFrameEqual}, dùng với pytest & 1 giờ \\
+\href{https://docs.github.com/en/actions/tutorials/build-and-test-code/python}{GitHub Actions: Python} & chọn phiên bản Python, cache dependency, pytest, Ruff & 1 giờ \\
+\href{https://bitol-io.github.io/open-data-contract-standard/v3.1.0/}{ODCS v3.1.0} & cấu trúc một contract, ví dụ YAML & 1 giờ \\
+\end{xltabular}
+
+\section{Khoá học miễn phí}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{2.6cm}@{}}
+\toprule
+\thd{khoá} & \thd{nội dung} & \thd{miễn phí} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://missing.csail.mit.edu/2026/version-control/}{MIT Missing Semester 2026: Version Control and Git} & mô hình dữ liệu của Git, branch, remote; có bài tập & toàn bộ bài giảng và bài tập \\
+\href{https://missing.csail.mit.edu/2026/code-quality/}{MIT Missing Semester 2026: Code Quality} & testing, pre-commit hook, continuous integration & toàn bộ \\
+\end{xltabular}
+
+\section{Lab thực hành}
+
+\subsection{Lab 10.1: cổng chất lượng chặn marts}
+\begin{enumerate}
+  \item Viết một module Python chứa các kiểm tra dạng SQL, mỗi kiểm tra trả về dòng vi phạm:
+  \begin{itemize}
+    \item \code{unique} và \code{not\_null} cho \code{order\_id} của \code{staging.orders}, \code{customer\_id} của \code{staging.\allowbreak customers}, \code{product\_id} của \code{staging.\allowbreak products}, \code{seller\_id} của \code{staging.sellers}; cặp \code{(order\_id, \allowbreak order\_item\_id)} của \code{staging.order\_items}.
+    \item \code{accepted\_values} cho \code{order\_status}: liệt kê giá trị khác nhau trong dữ liệu trước, rồi cố định danh sách.
+    \item \code{relationships}: \code{order\_items.order\_id} thuộc \code{orders}, \code{order\_items.product\_id} thuộc \code{products}, \code{order\_items.seller\_id} thuộc \code{sellers}, \code{orders.customer\_id} thuộc \code{customers}.
+  \end{itemize}
+  \item Chạy các kiểm tra trên dữ liệu hiện có và ghi lại kết quả; nếu một khoá bạn tưởng là duy nhất lại có trùng (thử \code{review\_id} của reviews), quyết định đó là lỗi dữ liệu hay giả định sai.
+  \item Thêm task \code{quality\_gate} vào DAG \code{olist\_staging} của Module 9, chạy sau \code{MERGE} và trước khi phát asset; có dòng vi phạm thì task fail.
+  \item Cố ý chèn một dòng \code{order\_items} có \code{product\_id} không tồn tại; chạy DAG.
+\end{enumerate}
+\hoanthanh{task \code{quality\_gate} fail, asset staging không được phát, và \code{olist\_marts} không chạy; xoá dòng xấu thì toàn bộ chạy xanh.}
+
+\subsection{Lab 10.2: write-audit-publish với branch Iceberg}
+Làm WAP cho \code{lake.staging.orders} trong Spark SQL:
+\begin{codeblock}
+ALTER TABLE lake.staging.orders SET TBLPROPERTIES ('write.wap.enabled'='true');
+ALTER TABLE lake.staging.orders CREATE BRANCH wap;
+
+SET spark.wap.branch = wap;
+MERGE INTO lake.staging.orders t USING batch_orders s
+ON t.order_id = s.order_id
+WHEN MATCHED THEN UPDATE SET *
+WHEN NOT MATCHED THEN INSERT *;
+RESET spark.wap.branch;
+
+-- kiểm trên branch, so với main
+SELECT count(*) FROM lake.staging.orders.branch_wap;
+SELECT count(*) FROM lake.staging.orders;
+
+-- chỉ khi mọi kiểm tra qua
+CALL lake.system.fast_forward('staging.orders', 'main', 'wap');
+\end{codeblock}
+\begin{enumerate}
+  \item Chạy các kiểm tra của Lab 10.1 trên \code{branch\_wap} thay vì trên \code{main}.
+  \item Lần một: dữ liệu sạch, kiểm tra qua, \code{fast\_forward}; xác nhận \code{main} có dữ liệu mới.
+  \item Lần hai: chèn dòng trùng \code{order\_id} vào lô; kiểm tra fail, không publish; xác nhận người đọc \code{main} không thấy dòng xấu. Bỏ branch hỏng bằng \code{ALTER TABLE ... DROP BRANCH} và tạo lại cho lần sau.
+  \item Đưa ba bước ghi, kiểm, publish vào DAG \code{olist\_staging} thay cho cổng của Lab 10.1.
+\end{enumerate}
+\hoanthanh{ở lần hai, số dòng của \code{main} không đổi và bảng snapshot cho thấy snapshot mới chỉ nằm trên branch.}
+
+\subsection{Lab 10.3: Git, pre-commit, unit test và CI}
+\begin{enumerate}
+  \item Đưa code DAG và job Spark vào Git, thêm \code{.gitignore} bỏ dữ liệu, file \code{.env} và volume Docker; đẩy lên một kho GitHub của bạn.
+  \item Thêm pre-commit với hook Ruff.
+  \item Tách hàm biến đổi (ví dụ khử trùng theo \code{order\_id} giữ bản \code{updated\_at} mới nhất) thành hàm thuần nhận và trả DataFrame; viết unit test với fixture \code{SparkSession} local và \code{assertDataFrameEqual}, có ca biên hai dòng cùng \code{updated\_at}.
+  \item Thêm workflow GitHub Actions như dưới; kiểm phiên bản mới nhất của từng action trong docs GitHub.
+\end{enumerate}
+\begin{codeblock}
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: pytest -q
+\end{codeblock}
+\hoanthanh{một pull request có test fail bị đánh đỏ, sửa xong thì xanh, và \code{ruff check} chạy cả rule \code{AIR301}, \code{AIR302} cho thư mục DAG.}
+
+\subsection{Lab 10.4 (tuỳ chọn): viết lại kiểm tra bằng GX Core}
+\begin{enumerate}
+  \item Chạy \href{https://docs.greatexpectations.io/docs/core/introduction/try_gx/}{Try GX} với pandas.
+  \item Xuất một mẫu \code{staging.orders} ra pandas và viết lại các kiểm tra \code{not\_null}, \code{unique}, \code{accepted\_values} thành expectation.
+  \item So số dòng code, thông báo lỗi và thời gian chạy với cách SQL của Lab 10.1.
+\end{enumerate}
+\hoanthanh{cùng một dòng xấu bị cả hai cách bắt, và bạn viết được ba câu về khi nào nên dùng thư viện.}
+
+\section{Kế hoạch theo tuần}
+\begin{xltabular}{\textwidth}{@{}P{1.4cm} L P{1.4cm}@{}}
+\toprule
+\thd{tuần} & \thd{việc} & \thd{giờ} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & dbt data tests, unit tests, model contracts, GX use cases, Iceberg Branching và Spark Procedures; Lab 10.1 và 10.2 & 10 \\
+2 & Missing Semester (Git, Code Quality), Pro Git chương 1 tới 3, pre-commit, pytest, Testing PySpark, GitHub Actions, ODCS; Lab 10.3; thử thách kỹ năng & 10 \\
+thêm & Lab 10.4 với GX Core; Airflow Metrics & 4 \\
+\end{xltabular}
+
+\begin{thuthach}
+Viết một data contract theo ODCS v3.1.0 cho bảng mart doanh thu theo danh mục và tháng: schema, khoá, quy tắc chất lượng (gồm đối soát tổng doanh thu mart với tổng \code{price} của \code{staging.order\_items} trong cùng tháng) và cam kết độ tươi. Sau đó tự hiện thực các quy tắc đó thành kiểm tra trong WAP của DAG marts, và thêm chúng vào CI ở dạng unit test trên dữ liệu mẫu nhỏ.
+\hoanthanh{file contract YAML hợp lệ theo ODCS, một lần cố ý làm lệch tổng doanh thu bị WAP chặn trước khi publish, và CI xanh trên nhánh chính.}
+\end{thuthach}
+
+\section{Câu hỏi tự kiểm tra}
+\begin{enumerate}
+  \item Unit test, data test, contract và test đầu cuối khác nhau thế nào? Cho mỗi loại một ví dụ trên Olist.
+  \item Vì sao dbt khuyên chỉ chạy unit test ở dev và CI, còn data test chạy cả ở production?
+  \item Kể bốn generic test của dbt và một kiểm tra Olist cho mỗi loại.
+  \item Contract của dbt bảo đảm gì, và vì sao khai báo \code{unique} trong contract thường không đủ?
+  \item Trong WAP trên Iceberg, người đọc \code{main} thấy gì khi branch đang giữ dữ liệu mới?
+  \item Nếu kiểm tra fail, bạn làm gì với branch, và vì sao không cần rollback \code{main}?
+  \item Ghép mỗi kiểm tra của Lab 10.1 với một chiều chất lượng trong danh sách use case của GX.
+  \item Kiểm tra nào chạy được trong GitHub Actions, kiểm tra nào chỉ chạy ở môi trường có đủ dịch vụ, và vì sao?
+  \item License Elastic License 2.0 của Soda Core cho phép và cấm điều gì?
+  \item Năm 2026, ai chăm sóc GX Core, và GX Cloud thuộc về ai?
+  \item Một data contract theo ODCS gồm những phần chính nào?
+\end{enumerate}
+
+\section{Điểm dễ nhầm}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{3.4cm}@{}}
+\toprule
+\thd{điểm dễ nhầm} & \thd{thực tế} & \thd{docs chính thức} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Nhiều người nghĩ data test và unit test là một & Unit test kiểm logic trên đầu vào tĩnh trước khi build; data test kiểm dữ liệu thật sau khi build & \href{https://docs.getdbt.com/docs/build/unit-tests}{dbt unit tests} \\
+Khai báo ràng buộc \code{unique} trong contract là đủ & Trên phần lớn nền tảng chỉ \code{not\_null} được thực thi; \code{unique}, \code{primary\_key}, \code{foreign\_key} chỉ được khai báo, nên vẫn cần data test & \href{https://docs.getdbt.com/docs/mesh/govern/model-contracts}{dbt model contracts} \\
+WAP cần một hệ thống versioning riêng & Branch Iceberg cộng \code{fast\_forward} làm được WAP ngay trong một bảng & \href{https://iceberg.apache.org/docs/latest/branching/}{Iceberg Branching} \\
+Đặt \code{spark.wap.branch} sẽ tự tạo branch & Branch phải tồn tại trước khi ghi & \href{https://iceberg.apache.org/docs/latest/spark-writes/}{Iceberg Spark Writes} \\
+Soda Core vẫn là Apache 2.0 & Soda đã chuyển Soda Core sang Elastic License 2.0; kiểm license của phiên bản bạn dùng & \href{https://soda.io/blog/soda-core-license-update-moving-to-elastic-license}{Soda} \\
+GX Core bị bán cùng GX Cloud & FICO mua GX Cloud; GX Core vẫn mã nguồn mở, do Fivetran chăm sóc & \href{https://www.fivetran.com/press/fivetran-to-become-steward-of-the-great-expectations-open-source-community-and-gx-core-project}{Fivetran} \\
+Pipeline xanh nghĩa là dữ liệu đúng & Trạng thái task chỉ nói code chạy xong; cần data test chặn trước khi publish & \href{https://docs.getdbt.com/docs/build/data-tests}{dbt data tests} \\
+\end{xltabular}

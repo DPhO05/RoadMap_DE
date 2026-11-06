@@ -1,0 +1,226 @@
+\modulechapter{4}{Lưu trữ và định dạng file}
+\moduleinfo{Trung cấp}{20 giờ}{Module 1, 2}
+
+Mọi lakehouse cuối cùng đều là các file nằm trên object storage. Module này đi xuống tầng thấp nhất của vòng đời dữ liệu: dữ liệu được xếp trong file ra sao (Parquet, Avro, Arrow), và object storage tương thích S3 bảo đảm gì khi bạn ghi, liệt kê và đổi tên các file đó. Bạn sẽ mở footer của một file Parquet thật, đo tác động của nén, sắp xếp và chia partition, rồi kiểm các bảo đảm của S3 bằng AWS CLI. Học xong, bạn hiểu vì sao cần một table format như Iceberg (Module 5) đặt lên trên tầng này.
+
+\section{Bạn sẽ học được}
+\begin{itemize}
+  \item Giải thích khác biệt giữa lưu theo dòng và lưu theo cột, và chọn Parquet, Avro hay Arrow cho đúng việc.
+  \item Đọc cấu trúc một file Parquet: magic number, footer, row group, column chunk, page, thống kê min/max và page index.
+  \item Chọn encoding, codec nén, kích thước row group và thứ tự sắp xếp để engine bỏ qua được nhiều dữ liệu.
+  \item Áp dụng quy tắc schema resolution của Avro khi schema bên ghi và bên đọc khác nhau.
+  \item Nêu chính xác S3 bảo đảm gì (strong read-after-write, ghi có điều kiện) và không bảo đảm gì (cập nhật nguyên tử trên nhiều key, rename).
+  \item Đo và giải thích vấn đề nhiều file nhỏ, rồi chọn cách chia partition hợp lý.
+\end{itemize}
+
+\section{Nội dung chính}
+
+\subsection{Định dạng file}
+\begin{enumerate}
+  \item \textbf{Lưu theo dòng và lưu theo cột.} Định dạng theo dòng (CSV, Avro) ghi trọn một bản ghi rồi mới tới bản ghi sau, hợp với ghi và đọc từng bản ghi. Định dạng theo cột (Parquet) gom giá trị của cùng một cột lại với nhau, nên truy vấn phân tích chỉ đọc những cột cần dùng và nén tốt hơn vì các giá trị giống kiểu đứng cạnh nhau. Parquet vẫn gom dòng: dữ liệu chia theo chiều ngang thành row group, trong mỗi row group mỗi cột là một column chunk (\href{https://parquet.apache.org/docs/concepts/}{Parquet: Concepts}).
+  \item \textbf{Bố cục một file Parquet.} File bắt đầu bằng 4 byte magic \code{PAR1}; cuối file là file metadata, rồi 4 byte độ dài metadata (little endian), rồi lại \code{PAR1}. Metadata ghi sau dữ liệu để bên ghi chỉ cần đi một lượt; bên đọc đọc footer trước để biết vị trí mọi column chunk (\href{https://parquet.apache.org/docs/file-format/}{Parquet: File Format}). Các struct metadata là Thrift, tuần tự hoá bằng \code{TCompactProtocol} (\href{https://parquet.apache.org/docs/file-format/metadata/}{Parquet: Metadata}).
+  \item \textbf{Row group, column chunk, page.} Row group là phân vùng ngang theo dòng; column chunk là dữ liệu của một cột trong một row group, nằm liền nhau trong file; page là đơn vị không chia nhỏ hơn về nén và encoding. Đơn vị song song: file hoặc row group cho việc chia job, column chunk cho I/O, page cho encoding và nén (\href{https://parquet.apache.org/docs/concepts/}{Parquet: Concepts}).
+  \item \textbf{Thống kê, page index và bloom filter.} Metadata của mỗi column chunk mang thống kê như min, max, null count; \code{pyarrow} in chúng qua \code{metadata.\allowbreak row\_group(i).\allowbreak column(j).\allowbreak statistics} (\href{https://arrow.apache.org/docs/python/parquet.html}{pyarrow: Parquet}). Page index (ColumnIndex và OffsetIndex) là metadata tuỳ chọn, nằm gần footer, cho phép bỏ qua từng page; docs ghi nó giúp point lookup và range scan trên cột đã sắp xếp hiệu quả hơn về I/O (\href{https://parquet.apache.org/docs/file-format/pageindex/}{Parquet: Page Index}). DuckDB có \code{parquet\_bloom\_probe} để xem row group nào bỏ qua được nhờ bloom filter (\href{https://duckdb.org/docs/2.0/data/parquet/metadata}{DuckDB: Parquet Metadata}).
+  \item \textbf{Encoding.} \code{PLAIN} dùng được cho mọi kiểu. Dictionary encoding hiện dùng \code{RLE\_DICTIONARY}; \code{PLAIN\_DICTIONARY} đã deprecated. Dictionary page được ghi trước các data page của column chunk; khi dictionary quá lớn, bên ghi quay về \code{PLAIN}. \code{DELTA\_BINARY\_PACKED} dành cho \code{INT32}, \code{INT64}. \code{BYTE\_STREAM\_SPLIT} tự nó không làm dữ liệu nhỏ đi; nó tách các byte của mỗi giá trị thành các luồng riêng để bước nén sau đó tốt hơn. Encoding \code{ALP} cho số thực đang ở trạng thái Preview (\href{https://parquet.apache.org/docs/file-format/data-pages/encodings/}{Parquet: Encodings}).
+  \item \textbf{Nén.} Nén áp lên từng page. \code{pyarrow} mặc định dùng Snappy và hỗ trợ Brotli, Gzip, ZSTD, LZ4, không nén (\href{https://arrow.apache.org/docs/python/parquet.html}{pyarrow: Parquet}); Iceberg mặc định codec \code{zstd} (property \code{write.parquet.\allowbreak compression-codec}) (\href{https://iceberg.apache.org/docs/latest/configuration/}{Iceberg: Configuration}). Danh sách codec trong đặc tả ở \href{https://parquet.apache.org/docs/file-format/data-pages/compression/}{Parquet: Compression}.
+  \item \textbf{Kích thước row group và page.} Parquet docs khuyên row group lớn (512 MB tới 1 GB) và page 8 KB (\href{https://parquet.apache.org/docs/file-format/configurations/}{Parquet: Configurations}); khái niệm block trong docs là block HDFS (\href{https://parquet.apache.org/docs/concepts/}{Concepts}). Iceberg mặc định row group 128 MB và file đích 512 MB (\code{write.parquet.\allowbreak row-group-size-bytes}, \code{write.target-\allowbreak file-size-bytes}, \href{https://iceberg.apache.org/docs/latest/configuration/}{Iceberg: Configuration}). Hai nguồn chính thức khác nhau, nên hãy tự đo trên dữ liệu và storage của bạn.
+  \item \textbf{Dữ liệu lồng.} Parquet biểu diễn struct và list bằng definition level và repetition level; đọc mục Nested Encoding và Nulls trong \href{https://parquet.apache.org/docs/file-format/}{Parquet File Format}.
+  \item \textbf{Avro và schema resolution.} Avro là định dạng theo dòng. Header của object container file bắt buộc có \code{avro.schema}, là schema JSON của dữ liệu trong file. Khi đọc bằng một schema khác, trường được khớp theo tên; trường bên ghi có mà bên đọc không có thì bị bỏ qua; trường bên đọc có mà bên ghi không có thì dùng giá trị mặc định, không có mặc định thì báo lỗi. Có các phép nâng kiểu như \code{int} lên \code{long}, \code{float}, \code{double}, và \code{string} với \code{bytes} đổi qua lại. Alias là tuỳ chọn của từng implementation (\href{https://avro.apache.org/docs/1.11.1/specification/}{Avro Specification}; trang có menu chọn bản mới hơn). Iceberg dùng Avro cho manifest (Module 5).
+  \item \textbf{Arrow.} Arrow định nghĩa bố cục cột trong bộ nhớ để engine và thư viện trao đổi dữ liệu mà không phải chuyển đổi; \code{pyarrow} đọc Parquet thành bảng Arrow (\href{https://arrow.apache.org/docs/format/Columnar.html}{Arrow Columnar Format}). Arrow không thay Parquet làm định dạng lưu trữ lâu dài.
+  \item \textbf{Schema khi ghi và khi đọc.} Parquet và Avro mang schema trong file; CSV thì không, nên engine phải đoán hoặc bạn phải khai báo. Đây là lý do tầng raw thường chuyển CSV sang Parquet sớm.
+\end{enumerate}
+
+\subsection{Object storage tương thích S3}
+\begin{enumerate}[resume]
+  \item \textbf{Key phẳng.} S3 có bucket và object, không có cây thư mục; ``folder'' trên console chỉ là prefix của key cộng dấu phân cách \code{/} (\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html}{S3: Object keys}).
+  \item \textbf{Consistency.} S3 có strong read-after-write cho PUT và DELETE ở mọi region; GET hoặc LIST sau một PUT thành công sẽ thấy dữ liệu vừa ghi. Nhưng cập nhật tính theo từng key, không có cách cập nhật nguyên tử trên nhiều key; hai PUT cùng lúc vào một key thì request có timestamp mới hơn thắng, và S3 không có object locking cho writer đồng thời (\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html\#ConsistencyModel}{S3: data consistency model}).
+  \item \textbf{Không có rename nguyên tử.} Với general purpose bucket, đổi tên là copy sang key mới rồi xoá (thêm delete marker cho) bản cũ; ``move'' một folder là nhiều thao tác trên từng object (\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/copy-object.html}{S3: Copying, moving, and renaming objects}). API \code{RenameObject} chỉ dành cho directory bucket (\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/directory-buckets-objects-rename.html}{S3: Renaming objects in directory buckets}).
+  \item \textbf{Ghi có điều kiện.} \code{If-None-Match: *} chỉ ghi khi key chưa tồn tại; \code{If-Match: <ETag>} chỉ ghi khi ETag hiện tại khớp. Hai header dùng được với \code{PutObject}, \code{Complete\allowbreak MultipartUpload}, \code{CopyObject}; điều kiện sai trả \code{412 Precondition Failed}. Khi hai lần ghi có điều kiện đua nhau, lần hoàn thành trước thắng, các lần sau nhận 412; nếu có lệnh xoá chen vào thì có thể nhận \code{409 Conflict}. Bucket policy có thể bắt buộc ghi có điều kiện (\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html}{S3: Conditional writes}). Storage tương thích S3 khác có thể chưa hỗ trợ đủ; hãy kiểm bằng lab.
+  \item \textbf{Liệt kê.} \code{ListObjectsV2} trả tối đa 1.000 key mỗi request, phân trang bằng \code{Continuation\allowbreak Token}; với general purpose bucket, key được trả theo thứ tự từ điển; \code{Prefix} cộng \code{Delimiter} gộp key thành \code{Common\allowbreak Prefixes} (\href{https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html}{ListObjectsV2}).
+  \item \textbf{Multipart upload.} AWS khuyên dùng multipart cho object từ 100 MB; số part từ 1 tới 10.000; object chỉ được dựng khi gọi complete; part của upload dở dang vẫn tính phí cho tới khi complete hoặc abort, nên đặt lifecycle rule \code{AbortIncompleteMultipartUpload} (\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html}{S3: Multipart upload}).
+  \item \textbf{Partition và vấn đề nhiều file nhỏ.} Chia partition kiểu Hive (\code{col=value/}) giúp bỏ qua thư mục khi lọc, nhưng cột có quá nhiều giá trị sinh ra rất nhiều file nhỏ. Mỗi file tốn ít nhất một mục khi liệt kê (1.000 key mỗi request), một lần đọc footer và một lần mở file; Iceberg docs ghi rằng file nhỏ sinh ra lượng metadata không cần thiết và truy vấn kém hiệu quả vì chi phí mở file, và có thủ tục compaction để gộp chúng (\href{https://iceberg.apache.org/docs/latest/maintenance/}{Iceberg: Maintenance}, mục Compact data files). \code{pyarrow.parquet.\allowbreak write\_to\_dataset} với \code{partition\_cols} là cách nhanh để tạo dataset chia partition và thấy vấn đề này (\href{https://arrow.apache.org/docs/python/parquet.html}{pyarrow: Parquet}).
+\end{enumerate}
+
+\section{Bắt đầu}
+\begin{itemize}
+  \item \href{https://arrow.apache.org/docs/python/parquet.html}{pyarrow: Reading and Writing the Apache Parquet Format}: ghi một bảng, đọc metadata của file (\code{FileMetaData}), rồi xem \code{row\_group(0).\allowbreak column(0)}.
+  \item \href{https://duckdb.org/docs/2.0/data/parquet/metadata}{DuckDB: Querying Parquet Metadata}: chạy \code{parquet\_metadata}, \code{parquet\_schema} trên cùng file.
+  \item \href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html}{S3: Conditional writes}: chạy ví dụ \code{put-object --if-none-match "*"} của trang, trỏ \code{--endpoint-url} tới RustFS.
+\end{itemize}
+
+\section{Tài liệu chính thức}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{1.8cm}@{}}
+\toprule
+\thd{tài liệu} & \thd{nội dung cần đọc} & \thd{thời lượng} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\href{https://parquet.apache.org/docs/concepts/}{Parquet: Concepts} & block, file, row group, column chunk, page, đơn vị song song & 0,5 giờ \\
+\href{https://parquet.apache.org/docs/file-format/}{Parquet: File Format} & bố cục file; các trang con Metadata, Nested Encoding, Nulls, Bloom Filter & 2 giờ \\
+\href{https://parquet.apache.org/docs/file-format/data-pages/encodings/}{Parquet: Encodings} & \code{PLAIN}, \code{RLE\_DICTIONARY}, \code{DELTA\_BINARY\_PACKED}, \code{BYTE\_STREAM\_SPLIT}, fallback về \code{PLAIN} & 1 giờ \\
+\href{https://parquet.apache.org/docs/file-format/pageindex/}{Parquet: Page Index} & ColumnIndex, OffsetIndex, vì sao đặt gần footer & 0,5 giờ \\
+\href{https://parquet.apache.org/docs/file-format/configurations/}{Parquet: Configurations} & khuyến nghị row group và page size & 0,25 giờ \\
+\href{https://arrow.apache.org/docs/python/parquet.html}{pyarrow: Parquet} & \code{write\_table}, \code{read\_metadata}, \code{ParquetFile}, \code{write\_to\_dataset} & 1,5 giờ \\
+\href{https://duckdb.org/docs/2.0/data/parquet/metadata}{DuckDB: Parquet Metadata} & \code{parquet\_metadata}, \code{parquet\_schema}, \code{parquet\_file\_metadata}, \code{parquet\_kv\_metadata}, \code{parquet\_bloom\_probe} & 0,5 giờ \\
+\href{https://avro.apache.org/docs/1.11.1/specification/}{Avro Specification} & Object Container Files, Schema Resolution, Aliases & 1,5 giờ \\
+\href{https://arrow.apache.org/docs/format/Columnar.html}{Arrow Columnar Format} & buffer, validity bitmap & 1 giờ \\
+\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html\#ConsistencyModel}{S3: data consistency model} & strong read-after-write, không cập nhật nguyên tử trên nhiều key & 0,5 giờ \\
+\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-writes.html}{S3: Conditional writes} & \code{If-None-Match}, \code{If-Match}, 412, 409, giới hạn với multipart & 1 giờ \\
+\href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html}{S3: Object keys} và \href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/copy-object.html}{Copy, move, rename} & mô hình phẳng; rename bằng copy rồi xoá & 0,5 giờ \\
+\href{https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html}{ListObjectsV2} và \href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html}{Multipart upload} & phân trang, \code{CommonPrefixes}; ngưỡng 100 MB, part 1--10.000 & 1 giờ \\
+\end{xltabular}
+
+\section{Khoá học miễn phí}
+\begin{itemize}
+  \item \href{https://15445.courses.cs.cmu.edu/fall2025/schedule.html}{CMU 15-445/645 Database Systems, Fall 2025}: miễn phí slide và video; xem bài \#03 Database Storage I, \#05 Database Storage II, \#06 Storage Models \& Compression.
+\end{itemize}
+
+\section{Lab thực hành}
+Chuẩn bị: tải bộ Olist từ Kaggle, giải nén vào thư mục \code{olist/}; cài \code{pyarrow} và DuckDB CLI; chạy RustFS trong Docker Compose của stack tham chiếu và có AWS CLI v2.
+
+\subsection{Lab 4.1: CSV so với Parquet và các codec}
+\begin{enumerate}
+  \item Trong DuckDB, bật \code{.timer on} rồi nạp bảng lớn nhất của Olist (geolocation, khoảng một triệu dòng):
+\begin{codeblock}
+CREATE TABLE geo AS SELECT * FROM read_csv('olist/olist_geolocation_dataset.csv');
+COPY geo TO 'geo_snappy.parquet' (FORMAT parquet, COMPRESSION snappy);
+COPY geo TO 'geo_zstd.parquet'   (FORMAT parquet, COMPRESSION zstd);
+COPY geo TO 'geo_none.parquet'   (FORMAT parquet, COMPRESSION uncompressed);
+\end{codeblock}
+  \item Ghi kích thước bốn file (\code{ls -l}). Chạy cùng truy vấn \code{SELECT geolocation\_state, avg(geolocation\_lat) FROM ... GROUP BY 1} trên CSV và ba file Parquet, ghi thời gian.
+  \item Dùng \code{parquet\_metadata('geo\_zstd.parquet')} xem cột \code{compression} và \code{encodings} của từng cột; cột nào được dictionary encoding?
+\end{enumerate}
+\hoanthanh{bạn có bảng 4 dòng (định dạng, kích thước, thời gian truy vấn) và giải thích được bằng metadata vì sao cột \code{geolocation\_state} nhỏ hơn nhiều so với cột số thực.}
+
+\subsection{Lab 4.2: Mở footer, sắp xếp và bỏ qua row group}
+\begin{enumerate}
+  \item Ghi bảng orders hai lần, một lần sắp theo thời gian mua, một lần xáo trộn, với row group nhỏ để dễ quan sát:
+\begin{codeblock}
+CREATE TABLE orders AS SELECT * FROM read_csv('olist/olist_orders_dataset.csv');
+COPY (SELECT * FROM orders ORDER BY order_purchase_timestamp)
+  TO 'orders_sorted.parquet' (FORMAT parquet, ROW_GROUP_SIZE 10000);
+COPY (SELECT * FROM orders ORDER BY random())
+  TO 'orders_random.parquet' (FORMAT parquet, ROW_GROUP_SIZE 10000);
+\end{codeblock}
+  \item Xem 4 byte đầu và 8 byte cuối: \code{head -c 4 orders\_sorted.parquet | xxd}, \code{tail -c 8 orders\_sorted.parquet | xxd}. Đổi 4 byte trước \code{PAR1} (little endian) ra số thập phân: đó là độ dài footer.
+  \item Đọc footer bằng \code{pyarrow}:
+\begin{codeblock}
+import pyarrow.parquet as pq
+md = pq.read_metadata("orders_sorted.parquet")
+print(md.num_rows, md.num_row_groups, md.serialized_size)
+for i in range(md.num_row_groups):
+    c = md.row_group(i).column(3)   # order_purchase_timestamp
+    print(i, c.path_in_schema, c.compression, c.encodings, c.statistics.min, c.statistics.max)
+\end{codeblock}
+  \item So với file xáo trộn:
+\begin{codeblock}
+SELECT row_group_id, stats_min, stats_max
+FROM parquet_metadata('orders_random.parquet')
+WHERE path_in_schema = 'order_purchase_timestamp';
+\end{codeblock}
+  \item Chạy truy vấn sau rồi lặp lại với file xáo trộn, so số dòng thật sự được quét:
+\begin{codeblock}
+EXPLAIN ANALYZE SELECT count(*) FROM 'orders_sorted.parquet'
+WHERE order_purchase_timestamp BETWEEN '2017-11-24' AND '2017-11-25';
+\end{codeblock}
+\end{enumerate}
+\hoanthanh{độ dài footer bạn tính từ 8 byte cuối khớp với \code{md.serialized\_size}, và bạn chỉ ra bằng \code{stats\_min}, \code{stats\_max} vì sao file đã sắp chỉ cần đọc một hai row group còn file xáo trộn phải đọc gần hết.}
+
+\subsection{Lab 4.3: Kiểm các bảo đảm của S3 trên RustFS}
+\begin{enumerate}
+  \item Đặt biến môi trường credential của RustFS, rồi dùng alias cho gọn (thay endpoint bằng cổng S3 API trong compose của bạn):
+\begin{codeblock}
+alias s3='aws --endpoint-url http://localhost:9000 s3'
+alias s3api='aws --endpoint-url http://localhost:9000 s3api'
+s3 mb s3://lab
+s3 cp orders_sorted.parquet s3://lab/raw/orders/year=2017/part-0.parquet
+s3 cp orders_random.parquet s3://lab/raw/orders/year=2018/part-0.parquet
+s3api list-objects-v2 --bucket lab --prefix raw/orders/ --delimiter /
+\end{codeblock}
+  \item Quan sát \code{CommonPrefixes}: ``thư mục'' chỉ là prefix. Chạy \code{s3 mv s3://lab/raw/orders/ s3://lab/raw/orders\_v2/ --recursive} và đọc output: mỗi object được chuyển riêng lẻ.
+  \item Ghi có điều kiện hai lần vào cùng một key:
+\begin{codeblock}
+echo v1 > flag.txt
+s3api put-object --bucket lab --key flag.txt --body flag.txt --if-none-match "*"
+s3api put-object --bucket lab --key flag.txt --body flag.txt --if-none-match "*"
+\end{codeblock}
+  Trên Amazon S3, lần hai phải nhận 412. Ghi lại RustFS phiên bản bạn dùng trả gì.
+  \item Làm một multipart upload bằng các lệnh \code{create-multipart-upload}, \code{upload-part} (ít nhất 2 part), \code{list-multipart-uploads}, \code{complete-multipart-upload} theo trang Multipart upload; kiểm rằng object chỉ xuất hiện trong \code{list-objects-v2} sau bước complete.
+\end{enumerate}
+\hoanthanh{bạn có một ghi chú ngắn: kết quả của lần PUT có điều kiện thứ hai, thời điểm object multipart xuất hiện, và giải thích vì sao \code{mv} một prefix không phải là thao tác nguyên tử.}
+
+\subsection{Lab 4.4: Vấn đề nhiều file nhỏ}
+\begin{enumerate}
+  \item Ghi bảng customers thành dataset chia partition theo cột có rất nhiều giá trị, và theo cột có ít giá trị:
+\begin{codeblock}
+import pyarrow.csv as pv, pyarrow.parquet as pq
+t = pv.read_csv("olist/olist_customers_dataset.csv")
+pq.write_to_dataset(t, root_path="cust_by_zip",   partition_cols=["customer_zip_code_prefix"])
+pq.write_to_dataset(t, root_path="cust_by_state", partition_cols=["customer_state"])
+pq.write_table(t, "cust_one.parquet")
+\end{codeblock}
+  \item Đếm file bằng \code{find cust\_by\_zip -name '*.parquet' | wc -l}. Tính số request \code{ListObjectsV2} tối thiểu để liệt kê dataset đó trên S3.
+  \item Trong DuckDB, đo truy vấn sau, rồi chạy cùng truy vấn trên \code{cust\_by\_state} và \code{cust\_one.parquet}:
+\begin{codeblock}
+SELECT customer_state, count(*)
+FROM read_parquet('cust_by_zip/**/*.parquet', hive_partitioning = true)
+GROUP BY 1;
+\end{codeblock}
+  \item Gộp \code{cust\_by\_zip} thành một file bằng \code{COPY (SELECT * FROM read\_parquet(...)) TO ...} rồi đo lại.
+\end{enumerate}
+\hoanthanh{bạn có bảng (cách ghi, số file, tổng dung lượng, thời gian truy vấn) và nêu được ba chi phí của file nhỏ: liệt kê, đọc footer và mở file, nén kém vì row group nhỏ.}
+
+\section{Kế hoạch theo tuần}
+\begin{xltabular}{\textwidth}{@{}P{1.4cm} L P{1.4cm}@{}}
+\toprule
+\thd{tuần} & \thd{việc} & \thd{giờ} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+1 & Đọc Parquet Concepts, File Format, Metadata, Encodings, Page Index, Configurations; pyarrow và DuckDB metadata; CMU bài \#06; làm Lab 4.1, 4.2 & 10 \\
+2 & Đọc Avro Specification, Arrow Columnar Format, các trang S3; làm Lab 4.3, 4.4; thử thách kỹ năng; câu hỏi tự kiểm tra & 10 \\
+thêm & CMU bài \#03, \#05; Parquet Nested Encoding và Bloom Filter; ORC specification để so sánh & 5 \\
+\end{xltabular}
+
+\begin{thuthach}
+Đội phân tích cần hai truy vấn chạy nhiều lần mỗi ngày trên dữ liệu Olist: doanh thu theo tháng và theo bang của khách hàng, và tra cứu mọi dòng hàng của một \code{order\_id}. Hãy thiết kế và tạo trên RustFS một bố cục Parquet cho bảng nối \code{order\_items}, \code{orders}, \code{customers}: chọn cột chia partition (hoặc không chia), thứ tự sắp xếp, kích thước row group, codec. Không có hướng dẫn từng bước; tự chọn công cụ trong stack tham chiếu.
+\hoanthanh{bạn trình bày được, bằng output của \code{parquet\_metadata} và \code{EXPLAIN ANALYZE}, rằng truy vấn một tháng chỉ đọc một phần nhỏ row group, truy vấn một \code{order\_id} bỏ qua được phần lớn dữ liệu, và dataset không có file nào nhỏ hơn mức bạn tự đặt ra kèm lý do.}
+\end{thuthach}
+
+\section{Câu hỏi tự kiểm tra}
+\begin{enumerate}
+  \item Vì sao bên đọc Parquet nhảy tới cuối file trước, và 8 byte cuối chứa gì?
+  \item Row group, column chunk và page khác nhau thế nào? Cái nào là đơn vị của I/O, cái nào là đơn vị của nén?
+  \item Min và max nằm ở đâu trong file, và vì sao sắp xếp trước khi ghi giúp bỏ qua nhiều dữ liệu hơn? Page index thêm được gì?
+  \item Khi nào dictionary encoding hết có lợi, và bên ghi làm gì khi đó?
+  \item \code{BYTE\_STREAM\_SPLIT} có tự làm file nhỏ đi không? Vì sao vẫn có ích?
+  \item Parquet docs và Iceberg đưa ra kích thước row group khác nhau. Bạn sẽ quyết định thế nào cho dữ liệu trên object storage?
+  \item Trong Avro, bên đọc có trường mà bên ghi không ghi và trường đó không có mặc định thì sao? Nếu có mặc định thì sao?
+  \item Arrow giải quyết vấn đề gì mà Parquet không, và vì sao engine đọc Parquet thành Arrow?
+  \item Kể hai bảo đảm S3 đưa ra và hai điều S3 không bảo đảm.
+  \item \code{If-None-Match: *} giúp gì cho việc commit, và hai lần ghi đua nhau thì kết quả ra sao?
+  \item Vì sao ``đổi tên thư mục'' không dùng làm commit nguyên tử trên S3 general purpose bucket?
+  \item Bảng chia partition theo cột có hàng chục nghìn giá trị, mỗi file vài KB: kể ba cái giá phải trả.
+\end{enumerate}
+
+\section{Điểm dễ nhầm}
+\begin{xltabular}{\textwidth}{@{}P{4.2cm} L P{3.2cm}@{}}
+\toprule
+\thd{điểm dễ nhầm} & \thd{thực tế} & \thd{docs chính thức} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Nhiều người nghĩ S3 có thư mục & Mô hình dữ liệu phẳng; folder chỉ là prefix của key & \href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-keys.html}{S3 Object keys} \\
+``Đổi tên thư mục trên S3 là nguyên tử'' & Rename là copy rồi xoá từng object; \code{RenameObject} chỉ có ở directory bucket & \href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/copy-object.html}{S3 Copy, move, rename} \\
+``LIST trên S3 có thể thiếu file vừa ghi'' & GET và LIST sau một PUT thành công thấy dữ liệu mới & \href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html\#ConsistencyModel}{S3 consistency} \\
+``Strong consistency nghĩa là S3 có transaction'' & Không có cập nhật nguyên tử trên nhiều key; hai PUT cùng key thì bản mới hơn thắng & \href{https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html\#ConsistencyModel}{S3 consistency} \\
+``Lưu theo cột nghĩa là không gom dòng'' & Parquet gom dòng thành row group, rồi chia theo cột thành column chunk và page & \href{https://parquet.apache.org/docs/concepts/}{Parquet Concepts} \\
+``Row group càng lớn càng tốt ở mọi nơi'' & Khuyến nghị 512 MB--1 GB của Parquet docs gắn với block HDFS; Iceberg mặc định 128 MB & \href{https://parquet.apache.org/docs/file-format/configurations/}{Parquet Configurations}, \href{https://iceberg.apache.org/docs/latest/configuration/}{Iceberg Configuration} \\
+``\code{BYTE\_STREAM\_SPLIT} là một kiểu nén'' & Nó chỉ sắp lại byte để codec phía sau nén tốt hơn & \href{https://parquet.apache.org/docs/file-format/data-pages/encodings/}{Parquet Encodings} \\
+``Arrow là định dạng lưu trữ cạnh tranh với Parquet'' & Arrow là bố cục cột trong bộ nhớ & \href{https://arrow.apache.org/docs/format/Columnar.html}{Arrow Columnar Format} \\
+``Avro không cần schema khi đọc'' & File container mang schema bên ghi; bên đọc đối chiếu với schema của mình theo luật resolution & \href{https://avro.apache.org/docs/1.11.1/specification/}{Avro Specification} \\
+``Càng nhiều partition càng nhanh'' & Nhiều file nhỏ làm tăng metadata và chi phí mở file; cần compaction & \href{https://iceberg.apache.org/docs/latest/maintenance/}{Iceberg Maintenance} \\
+\end{xltabular}
