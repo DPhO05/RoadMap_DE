@@ -6,7 +6,7 @@ Tài liệu này gom các câu hỏi khi bắt đầu học Databricks và câu 
 2. **Tại sao cần:** nó giải quyết vấn đề gì so với khi tự dựng một stack mã nguồn mở.
 3. **Khái niệm cần nắm:** phần chi tiết hơn, có lệnh và code.
 
-Tên sản phẩm, giới hạn của Free Edition và số liệu lấy từ docs Databricks bản AWS, kiểm ngày 11/11/2026. Databricks đổi tên sản phẩm nhiều lần trong 2025 và 2026, nên hãy mở docs bản mới nhất khi một tên không khớp với giao diện.
+Tên sản phẩm, giới hạn của Free Edition và số liệu lấy từ docs Databricks bản AWS (Amazon Web Services), kiểm ngày 11/11/2026. Databricks đổi tên sản phẩm nhiều lần trong 2025 và 2026, nên hãy mở docs bản mới nhất khi một tên không khớp với giao diện.
 
 Lab và số liệu trên bộ dữ liệu Olist nằm trong [lo_trinh_databricks.pdf](lo_trinh_databricks.pdf), dưới đây gọi là "lộ trình". Các lab đó đã chạy trên Spark local, chưa chạy trên Free Edition. Code ghi "chưa chạy" là code viết theo docs, chưa chạy ở đâu cả.
 
@@ -40,7 +40,7 @@ Cột "giống bên stack tự dựng" trong các bảng so Databricks với m�
 |---|---|
 | [lo_trinh_databricks.pdf](lo_trinh_databricks.pdf) | Module 0 tới 13 đã viết, 538 trang |
 | [hoc_pyspark.pdf](hoc_pyspark.pdf) | 25 chương: Lab 00 và notebook 09 tới 33 của khoá Learning PySpark with Databricks |
-| khoá nhập môn theo đề cương Databricks Academy | 7 chương đã viết, chưa ghép thành PDF, chưa đăng |
+| khoá nhập môn theo đề cương Databricks Academy | 7 chương đã viết, chưa ghép thành PDF (Portable Document Format), chưa đăng |
 
 Còn mở:
 
@@ -55,10 +55,10 @@ Lộ trình ghi: "Bạn cần biết Python cơ bản và dùng được dòng l
 |---|---|---|
 | Python: hàm, list, dict, đọc file | bắt buộc | tự học trước |
 | Dòng lệnh và Git | bắt buộc | tự học trước; Module 10 và 13 dùng nhiều |
-| SQL: `SELECT`, `JOIN`, `GROUP BY`, window function | nên có | Module 1 dạy, 40 giờ |
-| Khái niệm dữ liệu: CSV, JSON, Parquet, schema, partition | nên có | đã có nếu từng dựng lakehouse Iceberg |
+| SQL (Structured Query Language): `SELECT`, `JOIN`, `GROUP BY`, window function | nên có | Module 1 dạy, 40 giờ |
+| Khái niệm dữ liệu: CSV (comma-separated values), JSON (JavaScript Object Notation), Parquet, schema, partition | nên có | đã có nếu từng dựng lakehouse Iceberg |
 | Spark DataFrame: lazy, transformation, action | học song song | `hoc_pyspark.pdf` và Module 7 |
-| Cloud: S3, IAM | chỉ Module 13 | Module 13 |
+| Cloud: S3 (Amazon Simple Storage Service), IAM (Identity and Access Management) | chỉ Module 13 | Module 13 |
 
 Thứ tự gợi ý: Module 0, rồi Module 1 về SQL, rồi Module 2 và 3. Đọc `hoc_pyspark.pdf` trước khi vào Module 7. Người đã dựng lakehouse Iceberg có thể đọc lướt phần khái niệm của Module 2, như medallion và cách chọn kho.
 
@@ -81,16 +81,16 @@ Storage            S3 hoặc default storage, chứa file Parquet và _delta_log
 
 | tầng | thành phần | làm gì | giống bên stack tự dựng | module |
 |---|---|---|---|---|
-| Lưu trữ | Delta Lake | table format: Parquet cộng `_delta_log`, ACID, time travel | Iceberg | 5 |
-| Lưu trữ | Volumes | chứa file thô CSV, JSON; thay cho DBFS | bucket của object store | 4 |
-| Quản trị | Unity Catalog | metastore, quyền, lineage | REST catalog | 6 |
+| Lưu trữ | Delta Lake | table format: Parquet cộng `_delta_log`, ACID (Atomicity, Consistency, Isolation, Durability), time travel | Iceberg | 5 |
+| Lưu trữ | Volumes | chứa file thô CSV, JSON; thay cho DBFS (Databricks File System) | bucket của object store | 4 |
+| Quản trị | Unity Catalog | metastore, quyền, lineage | REST (Representational State Transfer) catalog | 6 |
 | Compute | serverless, classic (all-purpose, jobs compute) | chạy notebook, job, pipeline | Spark cluster | 7 |
-| Compute | SQL warehouse và Photon | chạy SQL cho BI và dashboard | Trino, ClickHouse | 1, 11 |
-| Nạp dữ liệu | Auto Loader, `COPY INTO`, Lakeflow Connect | nạp file tăng dần, connector cho database và SaaS | Spark job tự viết | 8 |
+| Compute | SQL warehouse và Photon | chạy SQL cho BI (business intelligence) và dashboard | Trino, ClickHouse | 1, 11 |
+| Nạp dữ liệu | Auto Loader, `COPY INTO`, Lakeflow Connect | nạp file tăng dần, connector cho database và SaaS (software as a service) | Spark job tự viết | 8 |
 | Pipeline | Lakeflow pipelines (tên cũ DLT) | khai báo bảng và kiểm chất lượng | Spark job tự viết | 9 |
-| Điều phối | Lakeflow Jobs (tên cũ Workflows) | lên lịch, DAG của task | Airflow | 9 |
+| Điều phối | Lakeflow Jobs (tên cũ Workflows) | lên lịch, DAG (directed acyclic graph) của task | Airflow | 9 |
 | Streaming | Structured Streaming | đọc Kafka, xử lý stream | Flink và Redpanda | 12 |
-| Dev và CI | notebook, Git folders, CLI, Declarative Automation Bundles | viết code, deploy bằng file cấu hình | repo cộng Docker Compose | 0, 10 |
+| Dev và CI (continuous integration) | notebook, Git folders, CLI (command-line interface), Declarative Automation Bundles | viết code, deploy bằng file cấu hình | repo cộng Docker Compose | 0, 10 |
 | Phục vụ | AI/BI dashboards, Genie Agents, OpenSharing | dashboard, hỏi bằng ngôn ngữ tự nhiên, chia sẻ dữ liệu | Grafana | 11 |
 | Giám sát | system tables như `system.billing.usage` | usage, chi phí, audit | Grafana | 11, 13 |
 
@@ -123,7 +123,7 @@ Trước kia những việc này vẫn làm được, nhưng phải tự ghép v
 
 | khi tự dựng | workspace giải quyết |
 |---|---|
-| mỗi công cụ một giao diện, một lần đăng nhập: Jupyter, Spark UI, Airflow, object store | một giao diện, một CLI, một API cho tất cả |
+| mỗi công cụ một giao diện, một lần đăng nhập: Jupyter, Spark UI (user interface), Airflow, object store | một giao diện, một CLI, một API (application programming interface) cho tất cả |
 | tự ghim phiên bản Spark và Delta, dễ lệch: pyspark 4.1.4 đi với delta-spark 4.3.1 không resolve được | Databricks Runtime ghim sẵn; serverless do Databricks nâng |
 | máy chạy suốt, tự vá, tự scale | serverless chỉ bật khi chạy và tính tiền theo giây; SQL warehouse tự tắt sau 10 phút |
 | quyền rải rác: key S3 nằm trong từng job, quyền catalog để riêng | quyền tập trung theo user và group, qua Unity Catalog |
@@ -149,7 +149,7 @@ Metastore   Unity Catalog, nằm ở mức account, gắn vào các workspace c�
 |---|---|---|
 | control plane | account Databricks | web app, backend |
 | serverless compute plane | account Databricks | compute serverless cho notebook, job, pipeline |
-| classic compute plane | account AWS của bạn | cluster bạn tự cấu hình; AWS tính thêm tiền VM |
+| classic compute plane | account AWS của bạn | cluster bạn tự cấu hình; AWS tính thêm tiền VM (virtual machine) |
 
 Dữ liệu nằm trên S3 của bạn. Workspace serverless dùng "default storage", vùng lưu trữ do Databricks quản lý.
 
@@ -168,7 +168,7 @@ Dữ liệu nằm trên S3 của bạn. Workspace serverless dùng "default stor
 ### 3.6 Notebook
 
 - Định dạng mặc định là `.ipynb`. Source format lưu thành `.py` hoặc `.sql` với dòng đầu `Databricks notebook source`, nên diff trên Git dễ đọc hơn.
-- Magic command: `%sql`, `%python`, `%md`, `%pip`, `%run`, `%sh`, `%fs`. Mỗi ngôn ngữ chạy một REPL riêng, nên biến không truyền qua ngôn ngữ khác. Kết quả của cell SQL nằm trong biến `_sqldf`.
+- Magic command: `%sql`, `%python`, `%md`, `%pip`, `%run`, `%sh`, `%fs`. Mỗi ngôn ngữ chạy một REPL (read-eval-print loop) riêng, nên biến không truyền qua ngôn ngữ khác. Kết quả của cell SQL nằm trong biến `_sqldf`.
 - `%pip install` chỉ áp dụng cho notebook hiện tại và mất khi hết session.
 - `dbutils` có các module chính `fs`, `secrets`, `widgets`, `notebook`, `jobs`.
 - Tách code: `%run` chạy notebook khác trong cùng context và không trả giá trị. `dbutils.notebook.run()` tạo một job tạm và trả về string. Docs khuyên để logic trong file `.py` rồi `import`.
@@ -186,19 +186,19 @@ SELECT * FROM samples.nyctaxi.trips WHERE fare_amount >= :min_fare LIMIT 100
 
 ### 3.7 Workspace files và Git folders
 
-- **Workspace file** chứa `.py`, YAML, `.whl`, tối đa 500 MB mỗi file, import tương đối như ở local. Trên serverless nên dùng đường dẫn tuyệt đối vì thư mục hiện hành không được đảm bảo. Executor không ghi được vào workspace file.
-- **Git folder**, tên cũ Repos, là bản clone repo nằm trong `/Workspace/Users/<email>/`. Chỉ hỗ trợ HTTPS. Nối GitHub bằng GitHub App hoặc personal access token. Mỗi working branch tối đa 1 GB.
+- **Workspace file** chứa `.py`, YAML (YAML Ain't Markup Language), `.whl`, tối đa 500 MB mỗi file, import tương đối như ở local. Trên serverless nên dùng đường dẫn tuyệt đối vì thư mục hiện hành không được đảm bảo. Executor không ghi được vào workspace file.
+- **Git folder**, tên cũ Repos, là bản clone repo nằm trong `/Workspace/Users/<email>/`. Chỉ hỗ trợ HTTPS (Hypertext Transfer Protocol Secure). Nối GitHub bằng GitHub App hoặc personal access token. Mỗi working branch tối đa 1 GB.
 
 ### 3.8 Compute trong workspace
 
 | loại | chọn phiên bản | Free Edition |
 |---|---|---|
 | serverless | chọn environment version 1 tới 6 cho Python và thư viện; Spark luôn là bản mới nhất | có, và là loại duy nhất |
-| classic cluster | chọn Databricks Runtime, ví dụ 18 LTS có Spark 4.1.0 và được hỗ trợ 3 năm | không |
+| classic cluster | chọn Databricks Runtime, ví dụ 18 LTS (long-term support) có Spark 4.1.0 và được hỗ trợ 3 năm | không |
 | SQL warehouse | chỉ chạy SQL, tự tắt sau 10 phút theo mặc định | 1 cái, cỡ 2X-Small |
 
-- Serverless không có Spark UI, RDD, `CACHE TABLE`, global temp view. Code đi qua Spark Connect.
-- ANSI mode bật sẵn, nên cast sai sẽ báo lỗi. Muốn nhận `NULL` thì dùng `try_cast`.
+- Serverless không có Spark UI, RDD (Resilient Distributed Dataset), `CACHE TABLE`, global temp view. Code đi qua Spark Connect.
+- ANSI (American National Standards Institute) mode bật sẵn, nên cast sai sẽ báo lỗi. Muốn nhận `NULL` thì dùng `try_cast`.
 - Notebook trên serverless timeout sau 2,5 giờ.
 
 ### 3.9 Vào workspace từ máy cá nhân
@@ -211,14 +211,14 @@ databricks current-user me -p <profile-name>
 
 - `~/.databrickscfg` chỉ giữ host và tên profile. Token OAuth nằm trong Keychain trên macOS, sống 1 giờ và tự làm mới.
 - Nếu shell còn biến `DATABRICKS_TOKEN` thì biến đó sẽ đè profile.
-- Databricks SDK for Python dùng `WorkspaceClient()`, giống boto3. Databricks Connect cho code chạy trên laptop còn Spark chạy trên serverless.
+- Databricks SDK (software development kit) for Python dùng `WorkspaceClient()`, giống boto3. Databricks Connect cho code chạy trên laptop còn Spark chạy trên serverless.
 
 ### 3.10 Tiền
 
-- DBU là đơn vị tính tiền, đếm theo giây. Xem chi tiết trong bảng `system.billing.usage`.
+- DBU (Databricks Unit) là đơn vị tính tiền, đếm theo giây. Xem chi tiết trong bảng `system.billing.usage`.
 - Free Edition không mất tiền. Vượt quota thì compute tắt tới hết ngày, dữ liệu không bị xoá.
 
-> **Bẫy lớn nhất:** coi workspace là máy dev riêng. Free Edition không có SLA, và account không hoạt động có thể bị xoá. Code phải nằm trong Git, logic phải nằm trong `src/`.
+> **Bẫy lớn nhất:** coi workspace là máy dev riêng. Free Edition không có SLA (service level agreement), và account không hoạt động có thể bị xoá. Code phải nằm trong Git, logic phải nằm trong `src/`.
 
 Đọc thêm: Module 0 của lộ trình. Docs: [concepts](https://docs.databricks.com/aws/en/getting-started/concepts), [high-level architecture](https://docs.databricks.com/aws/en/getting-started/high-level-architecture), [navigate the workspace](https://docs.databricks.com/aws/en/workspace/navigate-workspace), [notebooks](https://docs.databricks.com/aws/en/notebooks/notebooks-code), [Git folders](https://docs.databricks.com/aws/en/repos/), [CLI](https://docs.databricks.com/aws/en/dev-tools/cli/), [Free Edition limitations](https://docs.databricks.com/aws/en/getting-started/free-edition-limitations).
 
@@ -245,7 +245,7 @@ PySpark và SQL là 2 ngôn ngữ đi vào cùng một engine:
 | cửa vào | ngôn ngữ | compute | engine bên dưới |
 |---|---|---|---|
 | notebook, file `.py`, Lakeflow Jobs, Lakeflow pipelines, Databricks Connect | PySpark và SQL | serverless hoặc classic | Spark qua Spark Connect, Photon |
-| SQL editor, dashboard, công cụ BI nối qua JDBC | chỉ SQL | SQL warehouse | Spark SQL và Photon |
+| SQL editor, dashboard, công cụ BI nối qua JDBC (Java Database Connectivity) | chỉ SQL | SQL warehouse | Spark SQL và Photon |
 
 - Cả 2 loại compute đều có driver và worker. Trên serverless và SQL warehouse, Databricks quản lý các node nên bạn không thấy chúng. Không có Spark UI, thay vào đó là query profile.
 - SQL warehouse có "cluster size"; Free Edition cho "2X-Small cluster size". Warehouse tự thêm cluster khi nhiều query phải chờ.
@@ -254,7 +254,7 @@ PySpark và SQL là 2 ngôn ngữ đi vào cùng một engine:
 
 SQL editor cộng SQL warehouse làm được:
 
-- Chạy đủ DDL và DML: `CREATE TABLE`, `MERGE`, `QUALIFY`, CTE đệ quy, SQL scripting. Có thể dựng cả Bronze, Silver, Gold chỉ bằng SQL; Module 1 làm đúng việc này.
+- Chạy đủ DDL (Data Definition Language) và DML (Data Manipulation Language): `CREATE TABLE`, `MERGE`, `QUALIFY`, CTE (common table expression) đệ quy, SQL scripting. Có thể dựng cả Bronze, Silver, Gold chỉ bằng SQL; Module 1 làm đúng việc này.
 - Dùng tham số `:name`, lưu query, xem query history và query profile. Query profile cho thấy DAG operator, thời gian, bộ nhớ và phần trăm dữ liệu được bỏ qua nhờ pruning.
 - Làm nguồn cho dashboard và alert.
 - Phục vụ nhiều người cùng lúc. Serverless SQL warehouse khởi động trong 2 tới 6 giây.
@@ -272,7 +272,7 @@ Docs viết metastore "registers metadata about data, AI, and permissions".
 - Metastore nằm ở mức account, mỗi region một cái, và mọi workspace cùng region dùng chung.
 - Lý do tách khỏi workspace: một bảng và quyền của nó chỉ cần khai báo một lần, workspace nào gắn vào metastore cũng thấy giống nhau.
 - Cô lập không làm bằng cách tạo thêm metastore. Docs khuyên: "Use your single-region metastore for all software development lifecycle scopes and business units." Muốn cô lập thì tách catalog và bind catalog vào workspace.
-- Chưa kiểm trong docs: trước khi có Unity Catalog, mỗi workspace có Hive metastore và table ACL riêng, nên cùng một bảng phải khai báo và cấp quyền lại ở từng workspace.
+- Chưa kiểm trong docs: trước khi có Unity Catalog, mỗi workspace có Hive metastore và table ACL (access control list) riêng, nên cùng một bảng phải khai báo và cấp quyền lại ở từng workspace.
 
 ### 4.3 Tên 3 tầng có ứng với medallion hay workspace không
 
@@ -313,7 +313,7 @@ Metastore            mức account, 1 cái cho 1 region
 |---|---|
 | danh mục: catalog, schema, object | bảng nào nằm đâu, có schema gì |
 | quyền: `GRANT`, owner, kế thừa | ai được làm gì trên object nào |
-| quyền mịn: row filter, column mask, ABAC | ai thấy được dòng nào, cột nào |
+| quyền mịn: row filter, column mask, ABAC (attribute-based access control) | ai thấy được dòng nào, cột nào |
 | truy cập storage: storage credential, external location, volume | UC cầm chìa khoá S3, người dùng không cầm |
 | lineage | cột này được tính từ cột nào |
 | audit qua `system.access.audit` | ai đọc hay ghi gì, vào lúc nào |
@@ -392,7 +392,7 @@ Bẫy:
 | ABAC và governed tag | catalog hoặc schema, theo tag | một luật che mọi cột có tag `pii`; docs khuyên dùng cách này làm chính |
 
 - Dùng `is_account_group_member()`, không dùng `is_member()`, vì hàm sau không xét group ở mức account.
-- Từ khi ABAC GA ngày 28/04/2026, row filter và column mask được tính theo user đang chạy query.
+- Từ khi ABAC GA (generally available) ngày 28/04/2026, row filter và column mask được tính theo user đang chạy query.
 - Bẫy: bảng có row filter hoặc column mask thì mất time travel và clone. Không gắn row filter hay column mask lên view được.
 
 ### 5.8 Lineage, audit và xoá dữ liệu cá nhân
@@ -412,7 +412,7 @@ ORDER BY event_time DESC;
 
 | có | không có | chưa rõ, Lab 6.0 sẽ kiểm |
 |---|---|---|
-| UC bật sẵn, catalog `workspace`, tạo được schema, table, volume, function | account console, SCIM, SSO, storage riêng | group, service principal, row filter, column mask, ABAC, lineage, system tables |
+| UC bật sẵn, catalog `workspace`, tạo được schema, table, volume, function | account console, SCIM (System for Cross-domain Identity Management), SSO (single sign-on), storage riêng | group, service principal, row filter, column mask, ABAC, lineage, system tables |
 
 > **Bẫy lớn nhất:** `DELETE` báo thành công không có nghĩa là dữ liệu đã mất. Delta vẫn giữ file cũ và version cũ cho tới khi chạy `REORG ... APPLY (PURGE)` và `VACUUM`.
 
@@ -474,9 +474,9 @@ Iceberg giải đúng những vấn đề này. Trên Databricks, Delta là form
 | compaction | `OPTIMIZE` | |
 | hidden partitioning | liquid clustering | cơ chế khác nhau |
 | position delete | deletion vector | |
-| schema evolution theo ID cột | column mapping chế độ `id` | Delta phải bật mới có |
-| branch, tag, WAP | không có | |
-| commit CAS qua REST catalog | put-if-absent trên `N.json`, hoặc catalog commits | |
+| schema evolution theo ID (identifier) cột | column mapping chế độ `id` | Delta phải bật mới có |
+| branch, tag, WAP (write-audit-publish) | không có | |
+| commit CAS (compare-and-swap) qua REST catalog | put-if-absent trên `N.json`, hoặc catalog commits | |
 
 ### 6.3 Transaction log
 
@@ -546,7 +546,7 @@ DESCRIBE DETAIL workspace.default.olist_orders;
 
 - **Liquid clustering** là "recommended for all new tables". Tối đa 4 cột và không dùng chung với partition hay `ZORDER`. `CLUSTER BY AUTO` để Databricks tự chọn cột.
 - **Data skipping:** log giữ min và max của 32 cột đầu, nên query lọc theo các cột này sẽ bỏ qua file không khớp.
-- **Predictive optimization** tự chạy `OPTIMIZE`, `VACUUM`, `ANALYZE` cho bảng managed. Nó bật mặc định và tính tiền theo SKU serverless jobs.
+- **Predictive optimization** tự chạy `OPTIMIZE`, `VACUUM`, `ANALYZE` cho bảng managed. Nó bật mặc định và tính tiền theo SKU (stock keeping unit) serverless jobs.
 
 ```sql
 CREATE TABLE workspace.default.orders_lc CLUSTER BY (order_purchase_timestamp)
@@ -565,7 +565,7 @@ AS SELECT * FROM workspace.default.olist_orders;
 |---|---|---|
 | time travel, `OPTIMIZE`, `VACUUM`, deletion vector, liquid clustering chạy tay, Change Data Feed bản legacy | mở `_delta_log` của bảng managed, `VACUUM ... RETAIN 0 HOURS` | predictive optimization, `CLUSTER BY AUTO` |
 
-> **Bẫy lớn nhất:** coi lịch sử bảng như Git, tức là còn mãi và dùng làm backup được. Lab Module 5 xoá 97.242,96 BRL; `VERSION AS OF 0` vẫn đọc lại được, nhưng sau `VACUUM ... RETAIN 0 HOURS` thì báo `FAILED_READ_FILE.FILE_NOT_EXIST`. Docs: "Don't use table history as a long-term backup solution for data archival."
+> **Bẫy lớn nhất:** coi lịch sử bảng như Git, tức là còn mãi và dùng làm backup được. Lab Module 5 xoá 97.242,96 BRL (Brazilian real); `VERSION AS OF 0` vẫn đọc lại được, nhưng sau `VACUUM ... RETAIN 0 HOURS` thì báo `FAILED_READ_FILE.FILE_NOT_EXIST`. Docs: "Don't use table history as a long-term backup solution for data archival."
 
 Đọc thêm: Module 5 của lộ trình. Docs: [Delta Lake](https://docs.databricks.com/aws/en/delta/), [history](https://docs.databricks.com/aws/en/delta/history), [ACID](https://docs.databricks.com/aws/en/lakehouse/acid), [feature compatibility](https://docs.databricks.com/aws/en/delta/feature-compatibility), [VACUUM](https://docs.databricks.com/aws/en/delta/vacuum), [liquid clustering](https://docs.databricks.com/aws/en/delta/clustering), [Delta protocol](https://github.com/delta-io/delta/blob/master/PROTOCOL.md).
 
@@ -601,7 +601,7 @@ Storage             đọc và ghi Delta trên S3, qua Unity Catalog
 | máy chạy suốt, hoặc phải tự bật tắt | serverless cấp máy trong vài giây và tính tiền theo lượng dùng |
 | mọi job dùng chung 1 cluster | jobs compute riêng cho mỗi lần chạy |
 | nhiều query cùng lúc thì phải xếp hàng | SQL warehouse tự thêm cluster khi query phải chờ |
-| engine JVM | Photon (C++) cho scan, join, aggregate và ghi Delta |
+| engine JVM (Java Virtual Machine) | Photon (C++) cho scan, join, aggregate và ghi Delta |
 | cluster cầm key S3, ai chạy cũng đọc được | access mode Standard cách ly từng user; dữ liệu được đọc qua UC |
 
 Đổi lại, serverless giấu bớt một số thứ: không có Spark UI, không có RDD, chỉ đặt được 6 config, không có Scala và R, và runtime có thể tự nâng giữa 2 lần chạy.
@@ -621,7 +621,7 @@ Khác với Spark Classic trên laptop ở 3 chỗ:
 
 - Gõ sai tên cột chỉ báo lỗi lúc action hoặc lúc gọi `df.columns`.
 - DataFrame chỉ giữ tên temp view. Tạo lại view cùng tên thì DataFrame cũ đọc dữ liệu mới.
-- UDF đọc giá trị biến tại lúc chạy, không phải lúc định nghĩa:
+- UDF (user-defined function) đọc giá trị biến tại lúc chạy, không phải lúc định nghĩa:
 
 ```python
 x = 123
@@ -646,14 +646,14 @@ df.show()  # Spark Connect in 456; Spark Classic in 123
 | streaming | chỉ `Trigger.AvailableNow()` |
 | timeout | notebook 2,5 giờ; job tối đa 7 ngày |
 
-- 6 config đặt được: `spark.sql.shuffle.partitions`, `spark.sql.ansi.enabled`, `spark.sql.session.timeZone`, `spark.sql.files.maxPartitionBytes`, `spark.sql.legacy.timeParserPolicy`, `spark.databricks.execution.timeout`. Không có `spark.sql.adaptive.enabled`, nên AQE luôn bật.
+- 6 config đặt được: `spark.sql.shuffle.partitions`, `spark.sql.ansi.enabled`, `spark.sql.session.timeZone`, `spark.sql.files.maxPartitionBytes`, `spark.sql.legacy.timeParserPolicy`, `spark.databricks.execution.timeout`. Không có `spark.sql.adaptive.enabled`, nên AQE (Adaptive Query Execution) luôn bật.
 - Bẫy: không cài PySpark bằng `%pip` trên serverless.
 
 ### 7.6 Classic compute
 
-- **Access mode Standard**, tên cũ Shared, cho nhiều user dùng chung và cách ly họ bằng Lakeguard; không có RDD và R. **Access mode Dedicated**, tên cũ Single user, cho 1 người hoặc 1 nhóm; có RDD, R và ML runtime.
+- **Access mode Standard**, tên cũ Shared, cho nhiều user dùng chung và cách ly họ bằng Lakeguard; không có RDD và R. **Access mode Dedicated**, tên cũ Single user, cho 1 người hoặc 1 nhóm; có RDD, R và ML (machine learning) runtime.
 - **Databricks Runtime** ghim sẵn Spark, Python và Delta. Ví dụ 18 LTS có Spark 4.1.0 và được hỗ trợ tới 10/06/2029. Docs khuyên dùng bản mới nhất cho all-purpose compute và bản LTS cho job production.
-- **Compute policy** giới hạn cấu hình mà người khác được tạo, giống AWS SCP.
+- **Compute policy** giới hạn cấu hình mà người khác được tạo, giống AWS SCP (service control policy).
 
 ### 7.7 Photon
 
@@ -737,7 +737,7 @@ Ingestion là bước đưa dữ liệu từ nguồn (file, database, SaaS, API)
 | Lakeflow Connect | connector có sẵn cho database và SaaS | giao diện, API |
 | Python Data Source API | tự viết nguồn đọc API, offset nằm trong checkpoint | Python |
 | `MERGE INTO` | áp thay đổi vào bảng: upsert, xoá | SQL, Python |
-| AUTO CDC | khai báo khoá và thứ tự, engine tự áp thay đổi, SCD 1 hoặc 2 | SQL, Python trong pipeline |
+| AUTO CDC | khai báo khoá và thứ tự, engine tự áp thay đổi, SCD (slowly changing dimension) 1 hoặc 2 | SQL, Python trong pipeline |
 | Change Data Feed | đọc phần thay đổi của bảng Delta để nạp tầng sau | SQL, Python |
 
 ### 8.2 Tại sao cần
@@ -757,13 +757,13 @@ Row(dong=396551, cursor_khac=391551, don=99441, dong_shipped=100254)
 |---|---|
 | tự nhớ file đã đọc; job chết thì trùng hoặc sót | checkpoint của Auto Loader nhớ file đã nạp, mỗi file đúng 1 lần |
 | file có cột mới thì job vỡ, hoặc cột bị bỏ âm thầm | schema evolution; cột lạ vào `_rescued_data` |
-| tự dựng Debezium và Kafka để lấy CDC từ database | Lakeflow Connect có connector sẵn |
+| tự dựng Debezium và Kafka để lấy CDC (change data capture) từ database | Lakeflow Connect có connector sẵn |
 | tự viết upsert và tự xử lý event đến sai thứ tự | `MERGE` có điều kiện version, AUTO CDC với `SEQUENCE BY` |
 | liệt kê thư mục S3 lớn rất chậm | file events: được báo khi có file mới |
 
 ### 8.3 Auto Loader
 
-- Auto Loader là một Structured Streaming source tên `cloudFiles`. Nó đọc JSON, CSV, XML, Parquet, Avro, ORC, text và binary.
+- Auto Loader là một Structured Streaming source tên `cloudFiles`. Nó đọc JSON, CSV, XML (Extensible Markup Language), Parquet, Avro, ORC (Optimized Row Columnar), text và binary.
 - **Checkpoint** lưu danh sách file đã thấy trong RocksDB, nên mỗi file chỉ được nạp một lần. Thứ tự file không được đảm bảo.
 - **Trigger:** trên serverless chỉ có `availableNow` và `Once`. `availableNow` xử lý hết file có trước lúc bắt đầu rồi dừng, tức là chạy như batch theo lịch. Không đặt trigger thì báo lỗi `INFINITE_STREAMING_TRIGGER_NOT_SUPPORTED`.
 
@@ -997,7 +997,7 @@ def silver_orders():
 
 ### 9.7 Jobs: task và phụ thuộc
 
-- **Loại task:** Notebook, Python script, Python wheel, SQL, Pipeline, dbt, JAR, Dashboards, Run Job, If/else, For each và một số loại khác.
+- **Loại task:** Notebook, Python script, Python wheel, SQL, Pipeline, dbt, JAR (Java archive), Dashboards, Run Job, If/else, For each và một số loại khác.
 - **Depends on** và **Run if** với 6 điều kiện: All succeeded (mặc định), At least one succeeded, None failed, All done, At least one failed, All failed.
 - **Retry:** phần lớn job mặc định không retry. Đặt cả timeout và retry thì timeout tính cho từng lần thử.
 - Giới hạn: 1.000 task mỗi job, 2.000 task chạy cùng lúc mỗi workspace.
@@ -1065,7 +1065,7 @@ new_rows = dbutils.jobs.taskValues.get(taskKey="bronze_ingest", key="new_rows", 
 
 > **Câu hỏi:** Giải thích chất lượng, test, bundles và môi trường theo cùng khung.
 
-Phần này gom 4 việc giúp pipeline an toàn khi đổi code và khi nhận dữ liệu: test code bằng pytest, kiểm dữ liệu bằng expectations và cổng chất lượng, deploy bằng file cấu hình qua Declarative Automation Bundles (tên cũ Databricks Asset Bundles), và tách môi trường dev với prod qua CI/CD.
+Phần này gom 4 việc giúp pipeline an toàn khi đổi code và khi nhận dữ liệu: test code bằng pytest, kiểm dữ liệu bằng expectations và cổng chất lượng, deploy bằng file cấu hình qua Declarative Automation Bundles (tên cũ Databricks Asset Bundles), và tách môi trường dev với prod qua CI/CD (continuous integration and continuous delivery).
 
 ### 10.1 Gồm gì
 
@@ -1076,7 +1076,7 @@ Phần này gom 4 việc giúp pipeline an toàn khi đổi code và khi nhận 
 | expectations | dòng hỏng trong một lô dữ liệu | Lakeflow pipelines |
 | cổng chất lượng | lô hỏng ở mức cả lô: trùng, thiếu, lệch tổng | bảng staging, kiểm, rồi publish |
 | Declarative Automation Bundles | deploy bằng tay, cấu hình lệch giữa các môi trường | lệnh `databricks bundle` |
-| CI/CD | merge code chưa test, deploy từ máy cá nhân | GitHub Actions với OIDC và service principal |
+| CI/CD | merge code chưa test, deploy từ máy cá nhân | GitHub Actions với OIDC (OpenID Connect) và service principal |
 
 ### 10.2 Tại sao cần
 
@@ -1263,7 +1263,7 @@ Sau khi có Gold, dữ liệu phải tới được người và ứng dụng, v
 | BI | Genie Agents (tên cũ Genie Spaces) | hỏi dữ liệu bằng ngôn ngữ tự nhiên, Genie sinh SQL |
 | BI | metric views | định nghĩa chỉ số một lần, mọi công cụ dùng chung |
 | BI | SQL alerts | chạy query theo lịch, báo khi vượt ngưỡng |
-| ứng dụng | Statement Execution API, SQL Connector for Python, JDBC, ODBC | app gọi SQL warehouse |
+| ứng dụng | Statement Execution API, SQL Connector for Python, JDBC, ODBC (Open Database Connectivity) | app gọi SQL warehouse |
 | ứng dụng | Databricks Apps | chạy app Streamlit, Dash hoặc Node.js ngay trên Databricks |
 | ứng dụng | Lakebase và synced tables | Postgres có quản lý cho truy vấn điểm độ trễ thấp |
 | ứng dụng | OpenSharing (tên cũ Delta Sharing) | chia sẻ bảng cho đối tác mà không chép dữ liệu |
@@ -1364,7 +1364,7 @@ $$
 | Lakebase và synced tables | truy vấn điểm độ trễ thấp theo khoá | synced table chép bảng Delta sang Postgres; chế độ Triggered và Continuous cần Change Data Feed |
 | OpenSharing | đối tác đọc bảng của bạn | Databricks-to-Databricks không cần token; Databricks-to-Open dùng bearer token hoặc OIDC |
 
-- Synced table giống read model trong CQRS: phía ghi là lakehouse, phía đọc là Postgres có index. Docs: "Databricks strictly recommends running only read queries"; ghi vào bảng synced sẽ bị đè ở lần refresh sau.
+- Synced table giống read model trong CQRS (Command Query Responsibility Segregation): phía ghi là lakehouse, phía đọc là Postgres có index. Docs: "Databricks strictly recommends running only read queries"; ghi vào bảng synced sẽ bị đè ở lần refresh sau.
 - Bảng có row filter hoặc column mask không chia sẻ qua OpenSharing được. Bearer token sống lâu là rủi ro; ưu tiên OIDC hoặc Databricks-to-Databricks.
 
 ### 11.9 Giám sát bằng system tables
@@ -1392,7 +1392,7 @@ WHERE period_end_time >= current_timestamp() - INTERVAL 24 HOURS
 
 - **Job notifications** báo khi job bắt đầu, thành công, lỗi, chạy quá lâu, hoặc streaming backlog vượt ngưỡng; gửi qua email, Slack, PagerDuty, Teams, webhook. Dùng nó cho cảnh báo tức thì, vì `job_run_timeline` trễ khoảng 1 giờ.
 - **Data quality monitoring** có anomaly detection, GA tháng 10/2026. Freshness học từ lịch sử commit để biết khi nào bảng trễ bất thường. Completeness đoán khoảng số dòng ghi trong 24 giờ. Bảng mới phải qua giai đoạn Training trước khi có baseline.
-- **SLO độ tươi:** docs không có công thức. Cách của lộ trình là SQL alert trên `max` của cột thời gian ghi, tính trên dữ liệu có giá trị như đơn có doanh thu. Không dùng `information_schema.tables.last_altered`, vì nó đo lần đổi định nghĩa bảng, không đo dữ liệu.
+- **SLO (service level objective) độ tươi:** docs không có công thức. Cách của lộ trình là SQL alert trên `max` của cột thời gian ghi, tính trên dữ liệu có giá trị như đơn có doanh thu. Không dùng `information_schema.tables.last_altered`, vì nó đo lần đổi định nghĩa bảng, không đo dữ liệu.
 - Bẫy: cộng `usage_quantity` mà không xử lý dòng `RETRACTION` sẽ sai. "Job-level notifications aren't sent when failed tasks are retried."
 
 ### 11.10 Free Edition
@@ -1411,7 +1411,7 @@ WHERE period_end_time >= current_timestamp() - INTERVAL 24 HOURS
 
 > **Câu hỏi:** Giải thích streaming trên Databricks theo cùng khung.
 
-Databricks xử lý stream bằng Spark Structured Streaming, với 2 chế độ: micro-batch (mặc định, cho ETL và phân tích) và real-time mode (cho việc vận hành cần dưới 1 giây). Databricks không có Flink. Trên serverless, notebook và job chỉ chạy được trigger `availableNow`; muốn luồng chạy liên tục thì dùng Lakeflow pipeline ở continuous mode.
+Databricks xử lý stream bằng Spark Structured Streaming, với 2 chế độ. Micro-batch là mặc định, dùng cho ETL (extract, transform, load) và phân tích. Real-time mode dùng cho việc vận hành cần dưới 1 giây. Databricks không có Flink. Trên serverless, notebook và job chỉ chạy được trigger `availableNow`; muốn luồng chạy liên tục thì dùng Lakeflow pipeline ở continuous mode.
 
 ### 12.1 Gồm gì
 
@@ -1446,7 +1446,7 @@ numRowsDroppedByWatermark cộng dồn: 30
 |---|---|
 | Flink cho stream, Spark cho batch, 2 engine 2 API | một API DataFrame cho cả batch và stream |
 | Flink checkpoint, sink exactly-once vào Iceberg | checkpoint của Structured Streaming, Delta sink exactly-once qua transaction log |
-| keyed state và timer trong ProcessFunction của Flink | `transformWithState` với `ValueState`, `ListState`, `MapState`, timer, TTL |
+| keyed state và timer trong ProcessFunction của Flink | `transformWithState` với `ValueState`, `ListState`, `MapState`, timer, TTL (time to live) |
 | Flink SQL job chạy liên tục | Lakeflow pipeline continuous mode hoặc continuous job |
 | độ trễ mili giây của Flink | real-time mode |
 
@@ -1514,7 +1514,7 @@ df = (spark.readStream
 
 - `startingOffsets` chỉ có tác dụng khi query mới bắt đầu. Khởi động lại thì query luôn đọc tiếp từ checkpoint.
 - `maxOffsetsPerTrigger` giới hạn số offset mỗi batch. Metric lag gồm `avgOffsetsBehindLatest`, `maxOffsetsBehindLatest`, `estimatedTotalBytesBehindLatest`.
-- Xác thực SASL phải dùng tên class có tiền tố `kafkashaded.`. Databricks khuyên dùng Unity Catalog service credential trên serverless.
+- Xác thực SASL (Simple Authentication and Security Layer) phải dùng tên class có tiền tố `kafkashaded.`. Databricks khuyên dùng Unity Catalog service credential trên serverless.
 - SQL có hàm `read_kafka`. Lakeflow Connect có connector Kafka (Beta) để nạp Kafka thành streaming table mà không viết code Spark.
 
 ### 12.9 Real-time mode
@@ -1562,7 +1562,7 @@ Free Edition không có account console, nên phần này học trên free trial
 |---|---|
 | account console | quản lý workspace, user, budget ở cấp account, tại `https://accounts.cloud.databricks.com` |
 | workspace trên AWS | serverless workspace, hoặc classic workspace cấu hình tự động hay thủ công |
-| mạng | VPC, subnet, security group, PrivateLink cho classic compute |
+| mạng | VPC (Virtual Private Cloud), subnet, security group, PrivateLink cho classic compute |
 | Terraform provider `databricks/databricks` | dựng workspace và tài nguyên cấp account bằng code |
 | budgets | cảnh báo khi chi tiêu vượt ngưỡng, không chặn |
 | tag và serverless usage policy | gắn mỗi DBU với một team hay một dự án |
@@ -1571,7 +1571,7 @@ Free Edition không có account console, nên phần này học trên free trial
 
 ### 13.2 Tại sao cần
 
-Vấn đề thật ở Module 13 của lộ trình: ngày 15 của trial, account đã gắn thẻ nên tự chuyển sang trả theo mức dùng, và trần 50 DBU mỗi giờ của trial không còn. Chiều thứ Sáu, bạn tạo SQL warehouse trên UI mà không đổi cỡ, trỏ một job SQL chạy mỗi 15 phút vào nó, đặt budget 20 USD rồi nghỉ cuối tuần.
+Vấn đề thật ở Module 13 của lộ trình: ngày 15 của trial, account đã gắn thẻ nên tự chuyển sang trả theo mức dùng, và trần 50 DBU mỗi giờ của trial không còn. Chiều thứ Sáu, bạn tạo SQL warehouse trên UI mà không đổi cỡ, trỏ một job SQL chạy mỗi 15 phút vào nó, đặt budget 20 USD (United States dollar) rồi nghỉ cuối tuần.
 
 ```text
 2X-Small (4 DBU/giờ): Running 46.9 giờ, 187.7 DBU, 131.41 USD
@@ -1612,7 +1612,7 @@ X-Large (80 DBU/giờ): Running 46.9 giờ, 3754.7 DBU, 2628.27 USD
   - Network configuration: mặc định là VPC do Databricks quản lý; muốn tự quản thì tạo customer-managed VPC trước.
 - Bẫy:
   - Đổi `compute_mode` "requires recreation of the workspace".
-  - "Databricks trial credits apply only to Databricks usage." VPC và NAT gateway của classic workspace do AWS tính riêng.
+  - "Databricks trial credits apply only to Databricks usage." VPC và NAT (network address translation) gateway của classic workspace do AWS tính riêng.
   - "Classic compute (any compute that is not serverless) cannot interact with data assets in default storage."
 
 ### 13.5 Mạng ở mức nhập môn
@@ -1621,13 +1621,13 @@ X-Large (80 DBU/giờ): Running 46.9 giờ, 3754.7 DBU, 2628.27 USD
 - "You cannot move an existing workspace with a Databricks-managed VPC to use a customer-managed VPC."
 - PrivateLink cho classic compute cần gói Enterprise, customer-managed VPC và secure cluster connectivity.
 - Sau khi workspace ở trạng thái RUNNING, docs dặn "wait an additional 20 minutes after the status shows RUNNING before creating or using clusters".
-- Serverless workspace không cần tự quản mạng: egress kiểm soát bằng network policies, ingress bằng IP access list.
+- Serverless workspace không cần tự quản mạng: egress kiểm soát bằng network policies, ingress bằng IP (Internet Protocol) access list.
 
 ### 13.6 Terraform
 
 - Provider `databricks/databricks` bản mới nhất là v1.142.0, ngày 09/11/2026.
 - Docs chia việc: Terraform cho tài nguyên cấp cloud và việc admin như tạo workspace và mạng; Declarative Automation Bundles cho job, pipeline và notebook.
-- Provider cấp account dùng `host = "https://accounts.cloud.databricks.com"`; provider cấp workspace dùng URL của workspace.
+- Provider cấp account dùng `host = "https://accounts.cloud.databricks.com"`; provider cấp workspace dùng URL (Uniform Resource Locator) của workspace.
 
 Serverless workspace bằng Terraform, nguyên văn từ docs:
 
@@ -1653,7 +1653,7 @@ resource "databricks_mws_workspaces" "serverless_workspace" {
 
 - Serverless usage policy (Public Preview) là một tập tag gắn vào mọi hoạt động serverless của người được gán. Tag hiện trong cột `custom_tags` của `system.billing.usage`.
 - Bẫy: "Policy changes are only applied to usage initiated after the policy update." Policy không gắn tag cho classic compute. Pipeline được job gọi không thừa hưởng policy của job.
-- Classic compute có tag mặc định `Vendor`, `ClusterId`, `ClusterName`, `Creator`, được truyền xuống EC2 và EBS. Đừng đặt tag khoá `Name` cho cluster, vì khi đó cluster "can no longer be tracked by Databricks" và có thể không tự tắt.
+- Classic compute có tag mặc định `Vendor`, `ClusterId`, `ClusterName`, `Creator`, được truyền xuống EC2 (Amazon Elastic Compute Cloud) và EBS (Amazon Elastic Block Store). Đừng đặt tag khoá `Name` cho cluster, vì khi đó cluster "can no longer be tracked by Databricks" và có thể không tự tắt.
 
 ### 13.9 Compute policy và auto termination
 

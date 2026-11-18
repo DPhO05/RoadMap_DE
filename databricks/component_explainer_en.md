@@ -6,9 +6,9 @@ This document collects the questions that come up when you start learning Databr
 2. **Why it is needed:** which problem it solves compared with building an open source stack yourself.
 3. **Concepts to know:** more detail, with commands and code.
 
-Product names, Free Edition limits and numbers come from the Databricks docs for AWS, checked on 2026-11-11. Databricks renamed products several times in 2025 and 2026, so open the latest docs when a name does not match the UI.
+Product names, Free Edition limits and numbers come from the Databricks docs for AWS (Amazon Web Services), checked on 2026-11-11. Databricks renamed products several times in 2025 and 2026, so open the latest docs when a name does not match the UI (user interface).
 
-The labs and figures on the Olist dataset are in [lo_trinh_databricks.pdf](lo_trinh_databricks.pdf), called "the roadmap" below. Those labs ran on local Spark, not on Free Edition. Code marked "not run yet" was written from the docs and has not been run anywhere. The roadmap PDFs linked in this file are written in Vietnamese. A Vietnamese version of this file is at [giai_thich_thanh_phan.md](giai_thich_thanh_phan.md).
+The labs and figures on the Olist dataset are in [lo_trinh_databricks.pdf](lo_trinh_databricks.pdf), called "the roadmap" below. Those labs ran on local Spark, not on Free Edition. Code marked "not run yet" was written from the docs and has not been run anywhere. The roadmap PDFs (Portable Document Format files) linked in this file are written in Vietnamese. A Vietnamese version of this file is at [giai_thich_thanh_phan.md](giai_thich_thanh_phan.md).
 
 The column "equivalent in a self-built stack" in the tables compares Databricks with an open source lakehouse running on Docker Compose: Spark, Iceberg REST catalog, object store and Airflow. This is the author's comparison, not quoted from the docs.
 
@@ -55,10 +55,10 @@ The roadmap says: "You need basic Python and to be able to use the command line.
 |---|---|---|
 | Python: functions, lists, dicts, reading files | required | learn on your own first |
 | Command line and Git | required | learn on your own first; Modules 10 and 13 use them heavily |
-| SQL: `SELECT`, `JOIN`, `GROUP BY`, window functions | recommended | Module 1 teaches it, 40 hours |
-| Data concepts: CSV, JSON, Parquet, schema, partition | recommended | you already have these if you have built an Iceberg lakehouse |
+| SQL (Structured Query Language): `SELECT`, `JOIN`, `GROUP BY`, window functions | recommended | Module 1 teaches it, 40 hours |
+| Data concepts: CSV (comma-separated values), JSON (JavaScript Object Notation), Parquet, schema, partition | recommended | you already have these if you have built an Iceberg lakehouse |
 | Spark DataFrame: lazy evaluation, transformations, actions | learn in parallel | `hoc_pyspark.pdf` and Module 7 |
-| Cloud: S3, IAM | Module 13 only | Module 13 |
+| Cloud: S3 (Amazon Simple Storage Service), IAM (Identity and Access Management) | Module 13 only | Module 13 |
 
 Suggested order: Module 0, then Module 1 on SQL, then Modules 2 and 3. Read `hoc_pyspark.pdf` before starting Module 7. If you have built an Iceberg lakehouse, you can skim the concepts part of Module 2, such as medallion and how to choose a store.
 
@@ -81,16 +81,16 @@ Storage            S3 or default storage, holds Parquet files and _delta_log
 
 | layer | component | what it does | equivalent in a self-built stack | module |
 |---|---|---|---|---|
-| Storage | Delta Lake | table format: Parquet plus `_delta_log`, ACID, time travel | Iceberg | 5 |
-| Storage | Volumes | hold raw CSV and JSON files; replace DBFS | bucket of the object store | 4 |
-| Governance | Unity Catalog | metastore, privileges, lineage | REST catalog | 6 |
+| Storage | Delta Lake | table format: Parquet plus `_delta_log`, ACID (Atomicity, Consistency, Isolation, Durability), time travel | Iceberg | 5 |
+| Storage | Volumes | hold raw CSV and JSON files; replace DBFS (Databricks File System) | bucket of the object store | 4 |
+| Governance | Unity Catalog | metastore, privileges, lineage | REST (Representational State Transfer) catalog | 6 |
 | Compute | serverless, classic (all-purpose, jobs compute) | run notebooks, jobs, pipelines | Spark cluster | 7 |
-| Compute | SQL warehouse and Photon | run SQL for BI and dashboards | Trino, ClickHouse | 1, 11 |
-| Ingestion | Auto Loader, `COPY INTO`, Lakeflow Connect | incremental ingestion of files, connectors for databases and SaaS | hand-written Spark job | 8 |
+| Compute | SQL warehouse and Photon | run SQL for BI (business intelligence) and dashboards | Trino, ClickHouse | 1, 11 |
+| Ingestion | Auto Loader, `COPY INTO`, Lakeflow Connect | incremental ingestion of files, connectors for databases and SaaS (software as a service) | hand-written Spark job | 8 |
 | Pipelines | Lakeflow pipelines (old name DLT) | declare tables and check quality | hand-written Spark job | 9 |
-| Orchestration | Lakeflow Jobs (old name Workflows) | scheduling, DAG of tasks | Airflow | 9 |
+| Orchestration | Lakeflow Jobs (old name Workflows) | scheduling, DAG (directed acyclic graph) of tasks | Airflow | 9 |
 | Streaming | Structured Streaming | read Kafka, process streams | Flink and Redpanda | 12 |
-| Dev and CI | notebook, Git folders, CLI, Declarative Automation Bundles | write code, deploy with config files | repo plus Docker Compose | 0, 10 |
+| Dev and CI (continuous integration) | notebook, Git folders, CLI (command-line interface), Declarative Automation Bundles | write code, deploy with config files | repo plus Docker Compose | 0, 10 |
 | Serving | AI/BI dashboards, Genie Agents, OpenSharing | dashboards, ask questions in natural language, share data | Grafana | 11 |
 | Monitoring | system tables such as `system.billing.usage` | usage, cost, audit | Grafana | 11, 13 |
 
@@ -123,7 +123,7 @@ These things could always be done, but you had to assemble and operate each tool
 
 | self-built | what the workspace solves |
 |---|---|
-| one UI and one login per tool: Jupyter, Spark UI, Airflow, object store | one UI, one CLI, one API for everything |
+| one UI and one login per tool: Jupyter, Spark UI, Airflow, object store | one UI, one CLI, one API (application programming interface) for everything |
 | you pin Spark and Delta versions yourself and they drift: pyspark 4.1.4 with delta-spark 4.3.1 does not resolve | Databricks Runtime pins them; Databricks upgrades serverless |
 | machines run all the time, you patch and scale them yourself | serverless starts only when it runs and is billed per second; a SQL warehouse uses Auto Stop and shuts down after 10 minutes |
 | permissions scattered: S3 keys inside each job, catalog permissions kept separately | privileges centralized by user and group, through Unity Catalog |
@@ -149,7 +149,7 @@ Metastore   Unity Catalog, at account level, attached to workspaces in the same 
 |---|---|---|
 | control plane | Databricks account | web app, backend |
 | serverless compute plane | Databricks account | serverless compute for notebooks, jobs, pipelines |
-| classic compute plane | your AWS account | clusters you configure yourself; AWS charges extra for the VMs |
+| classic compute plane | your AWS account | clusters you configure yourself; AWS charges extra for the VMs (virtual machines) |
 
 Data lives in your S3. A serverless workspace uses "default storage", a storage area managed by Databricks.
 
@@ -168,7 +168,7 @@ This is the easiest place to get confused.
 ### 3.6 Notebook
 
 - The default format is `.ipynb`. Source format saves as `.py` or `.sql` with the first line `Databricks notebook source`, so diffs in Git are easier to read.
-- Magic commands: `%sql`, `%python`, `%md`, `%pip`, `%run`, `%sh`, `%fs`. Each language runs in its own REPL, so variables do not pass to another language. The result of a SQL cell is in the variable `_sqldf`.
+- Magic commands: `%sql`, `%python`, `%md`, `%pip`, `%run`, `%sh`, `%fs`. Each language runs in its own REPL (read-eval-print loop), so variables do not pass to another language. The result of a SQL cell is in the variable `_sqldf`.
 - `%pip install` applies only to the current notebook and is lost when the session ends.
 - `dbutils` has the main modules `fs`, `secrets`, `widgets`, `notebook`, `jobs`.
 - Splitting code: `%run` runs another notebook in the same context and returns no value. `dbutils.notebook.run()` creates a temporary job and returns a string. The docs recommend keeping logic in `.py` files and then using `import`.
@@ -186,19 +186,19 @@ SELECT * FROM samples.nyctaxi.trips WHERE fare_amount >= :min_fare LIMIT 100
 
 ### 3.7 Workspace files and Git folders
 
-- **Workspace files** hold `.py`, YAML and `.whl` files, up to 500 MB per file, with relative imports as on local. On serverless, use absolute paths because the current directory is not guaranteed. Executors cannot write to workspace files.
-- A **Git folder**, old name Repos, is a clone of a repo located in `/Workspace/Users/<email>/`. Only HTTPS is supported. Connect GitHub with a GitHub App or a personal access token. Each working branch is limited to 1 GB.
+- **Workspace files** hold `.py`, YAML (YAML Ain't Markup Language) and `.whl` files, up to 500 MB per file, with relative imports as on local. On serverless, use absolute paths because the current directory is not guaranteed. Executors cannot write to workspace files.
+- A **Git folder**, old name Repos, is a clone of a repo located in `/Workspace/Users/<email>/`. Only HTTPS (Hypertext Transfer Protocol Secure) is supported. Connect GitHub with a GitHub App or a personal access token. Each working branch is limited to 1 GB.
 
 ### 3.8 Compute in the workspace
 
 | type | choosing the version | Free Edition |
 |---|---|---|
 | serverless | choose environment version 1 to 6 for Python and libraries; Spark is always the latest | yes, and the only type |
-| classic cluster | choose a Databricks Runtime, for example 18 LTS has Spark 4.1.0 and is supported for 3 years | no |
+| classic cluster | choose a Databricks Runtime, for example 18 LTS (long-term support) has Spark 4.1.0 and is supported for 3 years | no |
 | SQL warehouse | SQL only, Auto Stop after 10 minutes by default | 1, size 2X-Small |
 
-- Serverless has no Spark UI, RDD, `CACHE TABLE` or global temp view. Code goes through Spark Connect.
-- ANSI mode is on by default, so a wrong cast raises an error. Use `try_cast` to get `NULL`.
+- Serverless has no Spark UI, RDD (Resilient Distributed Dataset), `CACHE TABLE` or global temp view. Code goes through Spark Connect.
+- ANSI (American National Standards Institute) mode is on by default, so a wrong cast raises an error. Use `try_cast` to get `NULL`.
 - A notebook on serverless times out after 2.5 hours.
 
 ### 3.9 Accessing the workspace from your own machine
@@ -211,14 +211,14 @@ databricks current-user me -p <profile-name>
 
 - `~/.databrickscfg` holds only the host and the profile name. The OAuth token lives in the Keychain on macOS, lasts 1 hour and refreshes itself.
 - If the shell still has the `DATABRICKS_TOKEN` variable, that variable overrides the profile.
-- Databricks SDK for Python uses `WorkspaceClient()`, like boto3. Databricks Connect lets code run on your laptop while Spark runs on serverless.
+- Databricks SDK (software development kit) for Python uses `WorkspaceClient()`, like boto3. Databricks Connect lets code run on your laptop while Spark runs on serverless.
 
 ### 3.10 Cost
 
-- The DBU is the billing unit, counted per second. See the details in the `system.billing.usage` table.
+- The DBU (Databricks Unit) is the billing unit, counted per second. See the details in the `system.billing.usage` table.
 - Free Edition costs nothing. When you go over the quota, compute stops until the end of the day and data is not deleted.
 
-> **Biggest pitfall:** treating the workspace as a personal dev machine. Free Edition has no SLA, and an inactive account may be deleted. Code must live in Git and logic must live in `src/`.
+> **Biggest pitfall:** treating the workspace as a personal dev machine. Free Edition has no SLA (service level agreement), and an inactive account may be deleted. Code must live in Git and logic must live in `src/`.
 
 Further reading: Module 0 of the roadmap. Docs: [concepts](https://docs.databricks.com/aws/en/getting-started/concepts), [high-level architecture](https://docs.databricks.com/aws/en/getting-started/high-level-architecture), [navigate the workspace](https://docs.databricks.com/aws/en/workspace/navigate-workspace), [notebooks](https://docs.databricks.com/aws/en/notebooks/notebooks-code), [Git folders](https://docs.databricks.com/aws/en/repos/), [CLI](https://docs.databricks.com/aws/en/dev-tools/cli/), [Free Edition limitations](https://docs.databricks.com/aws/en/getting-started/free-edition-limitations).
 
@@ -245,7 +245,7 @@ PySpark and SQL are 2 languages that go into the same engine:
 | entry point | language | compute | engine underneath |
 |---|---|---|---|
 | notebooks, `.py` files, Lakeflow Jobs, Lakeflow pipelines, Databricks Connect | PySpark and SQL | serverless or classic | Spark through Spark Connect, Photon |
-| SQL editor, dashboards, BI tools connected over JDBC | SQL only | SQL warehouse | Spark SQL and Photon |
+| SQL editor, dashboards, BI tools connected over JDBC (Java Database Connectivity) | SQL only | SQL warehouse | Spark SQL and Photon |
 
 - Both kinds of compute have a driver and workers. On serverless and SQL warehouses, Databricks manages the nodes, so you do not see them. There is no Spark UI. The query profile takes its place.
 - A SQL warehouse has a "cluster size"; Free Edition gives a "2X-Small cluster size". The warehouse adds clusters by itself when many queries have to wait.
@@ -254,7 +254,7 @@ PySpark and SQL are 2 languages that go into the same engine:
 
 The SQL editor plus a SQL warehouse can:
 
-- Run full DDL and DML: `CREATE TABLE`, `MERGE`, `QUALIFY`, recursive CTEs, SQL scripting. You can build Bronze, Silver and Gold entirely in SQL; Module 1 does exactly this.
+- Run full DDL (Data Definition Language) and DML (Data Manipulation Language): `CREATE TABLE`, `MERGE`, `QUALIFY`, recursive CTEs (common table expressions), SQL scripting. You can build Bronze, Silver and Gold entirely in SQL; Module 1 does exactly this.
 - Use `:name` parameters, save queries, and view query history and the query profile. The query profile shows the operator DAG, time, memory and the percentage of data skipped through pruning.
 - Serve as the source for dashboards and alerts.
 - Serve many people at the same time. A serverless SQL warehouse starts in 2 to 6 seconds.
@@ -272,7 +272,7 @@ The docs say the metastore "registers metadata about data, AI, and permissions".
 - The metastore is at account level, one per region, and every workspace in the same region shares it.
 - The reason it is separate from the workspace: a table and its privileges need to be declared only once, and every workspace attached to the metastore sees them the same way.
 - Isolation is not done by creating more metastores. The docs advise: "Use your single-region metastore for all software development lifecycle scopes and business units." To isolate, split catalogs and bind each catalog to workspaces.
-- Not verified in the docs: before Unity Catalog, each workspace had its own Hive metastore and table ACLs, so the same table had to be declared and granted again in each workspace.
+- Not verified in the docs: before Unity Catalog, each workspace had its own Hive metastore and table ACLs (access control lists), so the same table had to be declared and granted again in each workspace.
 
 ### 4.3 Does the three-level name map to medallion or to the workspace?
 
@@ -313,7 +313,7 @@ Metastore            account level, 1 per region
 |---|---|
 | catalog of objects: catalog, schema, object | which table lives where, which schema it has |
 | privileges: `GRANT`, owner, inheritance | who may do what on which object |
-| fine-grained access control: row filter, column mask, ABAC | who sees which rows and which columns |
+| fine-grained access control: row filter, column mask, ABAC (attribute-based access control) | who sees which rows and which columns |
 | storage access: storage credential, external location, volume | UC holds the S3 keys, users do not |
 | lineage | which columns this column is computed from |
 | audit through `system.access.audit` | who read or wrote what, and when |
@@ -392,7 +392,7 @@ Pitfalls:
 | ABAC and governed tag | catalog or schema, by tag | one rule masks every column with the tag `pii`; the docs recommend this as the main approach |
 
 - Use `is_account_group_member()`, not `is_member()`, because the latter does not check groups at account level.
-- Since ABAC became GA on 2026-04-28, row filters and column masks are evaluated for the user running the query.
+- Since ABAC became GA (generally available) on 2026-04-28, row filters and column masks are evaluated for the user running the query.
 - Pitfall: a table with a row filter or column mask loses time travel and clone. You cannot attach a row filter or column mask to a view.
 
 ### 5.8 Lineage, audit and deleting personal data
@@ -412,7 +412,7 @@ ORDER BY event_time DESC;
 
 | yes | no | unknown, Lab 6.0 will check |
 |---|---|---|
-| UC is on by default, catalog `workspace`, you can create schemas, tables, volumes, functions | account console, SCIM, SSO, own storage | groups, service principals, row filters, column masks, ABAC, lineage, system tables |
+| UC is on by default, catalog `workspace`, you can create schemas, tables, volumes, functions | account console, SCIM (System for Cross-domain Identity Management), SSO (single sign-on), own storage | groups, service principals, row filters, column masks, ABAC, lineage, system tables |
 
 > **Biggest pitfall:** `DELETE` reporting success does not mean the data is gone. Delta keeps the old files and old versions until you run `REORG ... APPLY (PURGE)` and `VACUUM`.
 
@@ -474,9 +474,9 @@ Compared with Iceberg:
 | compaction | `OPTIMIZE` | |
 | hidden partitioning | liquid clustering | different mechanisms |
 | position delete | deletion vector | |
-| schema evolution by column ID | column mapping in `id` mode | Delta has it only after you enable it |
-| branch, tag, WAP | not available | |
-| commit CAS through the REST catalog | put-if-absent on `N.json`, or catalog commits | |
+| schema evolution by column ID (identifier) | column mapping in `id` mode | Delta has it only after you enable it |
+| branch, tag, WAP (write-audit-publish) | not available | |
+| commit CAS (compare-and-swap) through the REST catalog | put-if-absent on `N.json`, or catalog commits | |
 
 ### 6.3 Transaction log
 
@@ -546,7 +546,7 @@ DESCRIBE DETAIL workspace.default.olist_orders;
 
 - **Liquid clustering** is "recommended for all new tables". Up to 4 columns, and it cannot be combined with partitioning or `ZORDER`. `CLUSTER BY AUTO` lets Databricks choose the columns.
 - **Data skipping:** the log keeps the min and max of the first 32 columns, so queries that filter on these columns skip files that do not match.
-- **Predictive optimization** automatically runs `OPTIMIZE`, `VACUUM` and `ANALYZE` for managed tables. It is on by default and billed under the serverless jobs SKU.
+- **Predictive optimization** automatically runs `OPTIMIZE`, `VACUUM` and `ANALYZE` for managed tables. It is on by default and billed under the serverless jobs SKU (stock keeping unit).
 
 ```sql
 CREATE TABLE workspace.default.orders_lc CLUSTER BY (order_purchase_timestamp)
@@ -565,7 +565,7 @@ AS SELECT * FROM workspace.default.olist_orders;
 |---|---|---|
 | time travel, `OPTIMIZE`, `VACUUM`, deletion vectors, liquid clustering run manually, the legacy version of Change Data Feed | opening the `_delta_log` of a managed table, `VACUUM ... RETAIN 0 HOURS` | predictive optimization, `CLUSTER BY AUTO` |
 
-> **Biggest pitfall:** treating table history like Git, as if it stays forever and can be used as a backup. The Module 5 lab deletes 97,242.96 BRL; `VERSION AS OF 0` can still read it back, but after `VACUUM ... RETAIN 0 HOURS` it reports `FAILED_READ_FILE.FILE_NOT_EXIST`. Docs: "Don't use table history as a long-term backup solution for data archival."
+> **Biggest pitfall:** treating table history like Git, as if it stays forever and can be used as a backup. The Module 5 lab deletes 97,242.96 BRL (Brazilian real); `VERSION AS OF 0` can still read it back, but after `VACUUM ... RETAIN 0 HOURS` it reports `FAILED_READ_FILE.FILE_NOT_EXIST`. Docs: "Don't use table history as a long-term backup solution for data archival."
 
 Further reading: Module 5 of the roadmap. Docs: [Delta Lake](https://docs.databricks.com/aws/en/delta/), [history](https://docs.databricks.com/aws/en/delta/history), [ACID](https://docs.databricks.com/aws/en/lakehouse/acid), [feature compatibility](https://docs.databricks.com/aws/en/delta/feature-compatibility), [VACUUM](https://docs.databricks.com/aws/en/delta/vacuum), [liquid clustering](https://docs.databricks.com/aws/en/delta/clustering), [Delta protocol](https://github.com/delta-io/delta/blob/master/PROTOCOL.md).
 
@@ -601,7 +601,7 @@ Storage             reads and writes Delta on S3, through Unity Catalog
 | machines run all the time, or you switch them on and off yourself | serverless provides machines within seconds and bills by usage |
 | every job shares 1 cluster | a separate jobs compute for each run |
 | many queries at once means queuing | a SQL warehouse adds clusters by itself when queries have to wait |
-| JVM engine | Photon (C++) for scan, join, aggregate and Delta writes |
+| JVM (Java Virtual Machine) engine | Photon (C++) for scan, join, aggregate and Delta writes |
 | the cluster holds the S3 key, so whoever runs on it can read | access mode Standard isolates each user; data is read through UC |
 
 In return, serverless hides some things: no Spark UI, no RDD, only 6 configs can be set, no Scala and R, and the runtime may upgrade itself between 2 runs.
@@ -621,7 +621,7 @@ It differs from Spark Classic on a laptop in 3 ways:
 
 - A mistyped column name raises an error only at an action or when you call `df.columns`.
 - A DataFrame holds only the name of a temp view. If you recreate a view with the same name, the old DataFrame reads the new data.
-- A UDF reads the value of a variable at run time, not at definition time:
+- A UDF (user-defined function) reads the value of a variable at run time, not at definition time:
 
 ```python
 x = 123
@@ -646,14 +646,14 @@ df.show()  # Spark Connect prints 456; Spark Classic prints 123
 | streaming | only `Trigger.AvailableNow()` |
 | timeout | notebook 2.5 hours; job up to 7 days |
 
-- The 6 configs you can set: `spark.sql.shuffle.partitions`, `spark.sql.ansi.enabled`, `spark.sql.session.timeZone`, `spark.sql.files.maxPartitionBytes`, `spark.sql.legacy.timeParserPolicy`, `spark.databricks.execution.timeout`. There is no `spark.sql.adaptive.enabled`, so AQE is always on.
+- The 6 configs you can set: `spark.sql.shuffle.partitions`, `spark.sql.ansi.enabled`, `spark.sql.session.timeZone`, `spark.sql.files.maxPartitionBytes`, `spark.sql.legacy.timeParserPolicy`, `spark.databricks.execution.timeout`. There is no `spark.sql.adaptive.enabled`, so AQE (Adaptive Query Execution) is always on.
 - Pitfall: do not install PySpark with `%pip` on serverless.
 
 ### 7.6 Classic compute
 
-- **Access mode Standard**, old name Shared, lets many users share a cluster and isolates them with Lakeguard; it has no RDD and no R. **Access mode Dedicated**, old name Single user, is for 1 person or 1 group; it has RDD, R and the ML runtime.
+- **Access mode Standard**, old name Shared, lets many users share a cluster and isolates them with Lakeguard; it has no RDD and no R. **Access mode Dedicated**, old name Single user, is for 1 person or 1 group; it has RDD, R and the ML (machine learning) runtime.
 - **Databricks Runtime** pins Spark, Python and Delta. For example, 18 LTS has Spark 4.1.0 and is supported until 2029-06-10. The docs recommend the latest version for all-purpose compute and an LTS version for production jobs.
-- A **compute policy** limits the configurations that other people may create, like an AWS SCP.
+- A **compute policy** limits the configurations that other people may create, like an AWS SCP (service control policy).
 
 ### 7.7 Photon
 
@@ -737,7 +737,7 @@ Ingestion is the step that brings data from a source (files, databases, SaaS, AP
 | Lakeflow Connect | ready-made connectors for databases and SaaS | UI, API |
 | Python Data Source API | write your own source that reads an API, offset kept in the checkpoint | Python |
 | `MERGE INTO` | apply changes to a table: upsert, delete | SQL, Python |
-| AUTO CDC | declare the key and the ordering, the engine applies the changes, SCD type 1 or 2 | SQL, Python in a pipeline |
+| AUTO CDC | declare the key and the ordering, the engine applies the changes, SCD (slowly changing dimension) type 1 or 2 | SQL, Python in a pipeline |
 | Change Data Feed | read the changes of a Delta table to ingest into the next layer | SQL, Python |
 
 ### 8.2 Why it is needed
@@ -757,13 +757,13 @@ Row(dong=396551, cursor_khac=391551, don=99441, dong_shipped=100254)
 |---|---|
 | you track which files were read yourself; if the job dies you get duplicates or gaps | the Auto Loader checkpoint remembers ingested files, each file exactly once |
 | a file with a new column breaks the job, or the column is silently dropped | schema evolution; unknown columns go into `_rescued_data` |
-| build Debezium and Kafka yourself to get CDC from a database | Lakeflow Connect has ready-made connectors |
+| build Debezium and Kafka yourself to get CDC (change data capture) from a database | Lakeflow Connect has ready-made connectors |
 | write upserts yourself and handle out-of-order events yourself | `MERGE` with a version condition, AUTO CDC with `SEQUENCE BY` |
 | listing a large S3 folder is very slow | file events: you are notified when a new file arrives |
 
 ### 8.3 Auto Loader
 
-- Auto Loader is a Structured Streaming source named `cloudFiles`. It reads JSON, CSV, XML, Parquet, Avro, ORC, text and binary.
+- Auto Loader is a Structured Streaming source named `cloudFiles`. It reads JSON, CSV, XML (Extensible Markup Language), Parquet, Avro, ORC (Optimized Row Columnar), text and binary.
 - **Checkpoint** stores the list of files seen in RocksDB, so each file is ingested only once. File order is not guaranteed.
 - **Trigger:** on serverless only `availableNow` and `Once` are available. `availableNow` processes all files that exist before it starts and then stops, so it runs like a scheduled batch. If you set no trigger, you get the error `INFINITE_STREAMING_TRIGGER_NOT_SUPPORTED`.
 
@@ -997,7 +997,7 @@ def silver_orders():
 
 ### 9.7 Jobs: tasks and dependencies
 
-- **Task types:** Notebook, Python script, Python wheel, SQL, Pipeline, dbt, JAR, Dashboards, Run Job, If/else, For each and some others.
+- **Task types:** Notebook, Python script, Python wheel, SQL, Pipeline, dbt, JAR (Java archive), Dashboards, Run Job, If/else, For each and some others.
 - **Depends on** and **Run if** with 6 conditions: All succeeded (the default), At least one succeeded, None failed, All done, At least one failed, All failed.
 - **Retry:** most jobs do not retry by default. If you set both a timeout and a retry, the timeout applies to each attempt.
 - Limits: 1,000 tasks per job, 2,000 tasks running at the same time per workspace.
@@ -1065,7 +1065,7 @@ Further reading: Module 9 of the roadmap. Docs: [Lakeflow pipelines](https://doc
 
 > **Question:** Explain quality, tests, bundles and environments using the same framework.
 
-This section groups 4 jobs that keep a pipeline safe when the code changes and when data arrives: testing code with pytest, checking data with expectations and quality gates, deploying from configuration files through Declarative Automation Bundles (old name Databricks Asset Bundles), and separating dev from prod through CI/CD.
+This section groups 4 jobs that keep a pipeline safe when the code changes and when data arrives: testing code with pytest, checking data with expectations and quality gates, deploying from configuration files through Declarative Automation Bundles (old name Databricks Asset Bundles), and separating dev from prod through CI/CD (continuous integration and continuous delivery).
 
 ### 10.1 What it contains
 
@@ -1076,7 +1076,7 @@ This section groups 4 jobs that keep a pipeline safe when the code changes and w
 | expectations | bad rows within a batch of data | Lakeflow pipelines |
 | quality gate | a bad batch at the level of the whole batch: duplicates, missing rows, a mismatched total | staging table, check, then publish |
 | Declarative Automation Bundles | manual deploys, configuration drift between environments | `databricks bundle` commands |
-| CI/CD | merging untested code, deploying from a personal machine | GitHub Actions with OIDC and a service principal |
+| CI/CD | merging untested code, deploying from a personal machine | GitHub Actions with OIDC (OpenID Connect) and a service principal |
 
 ### 10.2 Why it is needed
 
@@ -1263,7 +1263,7 @@ Once Gold exists, the data must reach people and applications, and you must know
 | BI | Genie Agents (old name Genie Spaces) | ask questions about data in natural language, Genie generates the SQL |
 | BI | metric views | define a metric once, every tool shares it |
 | BI | SQL alerts | run a query on a schedule, notify when a threshold is passed |
-| application | Statement Execution API, Databricks SQL Connector for Python, JDBC, ODBC | an app calls a SQL warehouse |
+| application | Statement Execution API, Databricks SQL Connector for Python, JDBC, ODBC (Open Database Connectivity) | an app calls a SQL warehouse |
 | application | Databricks Apps | run Streamlit, Dash or Node.js apps right on Databricks |
 | application | Lakebase and synced tables | managed Postgres for low-latency point queries |
 | application | OpenSharing (old name Delta Sharing) | share tables with partners without copying the data |
@@ -1364,7 +1364,7 @@ $$
 | Lakebase and synced tables | low-latency point queries by key | a synced table copies a Delta table into Postgres; the Triggered and Continuous modes need Change Data Feed |
 | OpenSharing | partners read your table | Databricks-to-Databricks needs no token; Databricks-to-Open uses a bearer token or OIDC |
 
-- A synced table is like the read model in CQRS: the write side is the lakehouse, the read side is Postgres with indexes. Docs: "Databricks strictly recommends running only read queries"; writes into a synced table are overwritten at the next refresh.
+- A synced table is like the read model in CQRS (Command Query Responsibility Segregation): the write side is the lakehouse, the read side is Postgres with indexes. Docs: "Databricks strictly recommends running only read queries"; writes into a synced table are overwritten at the next refresh.
 - A table with a row filter or column mask cannot be shared through OpenSharing. A long-lived bearer token is a risk; prefer OIDC or Databricks-to-Databricks.
 
 ### 11.9 Monitoring with system tables
@@ -1392,7 +1392,7 @@ WHERE period_end_time >= current_timestamp() - INTERVAL 24 HOURS
 
 - **Job notifications** notify when a job starts, succeeds, fails, runs too long, or when a streaming backlog passes a threshold; they are sent by email, Slack, PagerDuty, Teams or webhook. Use them for immediate alerts, because `job_run_timeline` lags by about 1 hour.
 - **Data quality monitoring** has anomaly detection, GA in October 2026. Freshness learns from the commit history to know when a table is unusually late. Completeness estimates the expected range of rows written in 24 hours. A new table must go through a Training period before it has a baseline.
-- **Freshness SLO:** the docs have no formula. The roadmap's way is a SQL alert on the `max` of the column that records when each row was written, computed over rows that carry business value, such as orders with revenue. Do not use `information_schema.tables.last_altered`, because it measures the last change to the table definition, not the data.
+- **Freshness SLO (service level objective):** the docs have no formula. The roadmap's way is a SQL alert on the `max` of the column that records when each row was written, computed over rows that carry business value, such as orders with revenue. Do not use `information_schema.tables.last_altered`, because it measures the last change to the table definition, not the data.
 - Pitfall: summing `usage_quantity` without handling `RETRACTION` rows gives wrong numbers. "Job-level notifications aren't sent when failed tasks are retried."
 
 ### 11.10 Free Edition
@@ -1411,7 +1411,7 @@ Further reading: Module 11 of the roadmap. Docs: [SQL warehouse types](https://d
 
 > **Question:** Explain streaming on Databricks using the same framework.
 
-Databricks processes streams with Spark Structured Streaming, in 2 modes: micro-batch (the default, for ETL and analytics) and real-time mode (for operational work that needs under 1 second). Databricks has no Flink. On serverless, notebooks and jobs can run only the `availableNow` trigger; to keep a stream running continuously, use a Lakeflow pipeline in continuous mode.
+Databricks processes streams with Spark Structured Streaming, in 2 modes. Micro-batch is the default and is used for ETL (extract, transform, load) and analytics. Real-time mode is used for operational work that needs under 1 second. Databricks has no Flink. On serverless, notebooks and jobs can run only the `availableNow` trigger; to keep a stream running continuously, use a Lakeflow pipeline in continuous mode.
 
 ### 12.1 What it contains
 
@@ -1446,7 +1446,7 @@ numRowsDroppedByWatermark cộng dồn: 30
 |---|---|
 | Flink for streams, Spark for batch, 2 engines and 2 APIs | one DataFrame API for both batch and stream |
 | Flink checkpoint, exactly-once sink into Iceberg | the Structured Streaming checkpoint, Delta sink exactly-once through the transaction log |
-| keyed state and timers in Flink's ProcessFunction | `transformWithState` with `ValueState`, `ListState`, `MapState`, timers, TTL |
+| keyed state and timers in Flink's ProcessFunction | `transformWithState` with `ValueState`, `ListState`, `MapState`, timers, TTL (time to live) |
 | a Flink SQL job that runs continuously | a Lakeflow pipeline in continuous mode or a continuous job |
 | Flink's millisecond latency | real-time mode |
 
@@ -1514,7 +1514,7 @@ df = (spark.readStream
 
 - `startingOffsets` takes effect only when a query starts fresh. After a restart, the query always continues from the checkpoint.
 - `maxOffsetsPerTrigger` limits the number of offsets per batch. The lag metrics include `avgOffsetsBehindLatest`, `maxOffsetsBehindLatest` and `estimatedTotalBytesBehindLatest`.
-- SASL authentication must use class names with the `kafkashaded.` prefix. Databricks recommends a Unity Catalog service credential on serverless.
+- SASL (Simple Authentication and Security Layer) authentication must use class names with the `kafkashaded.` prefix. Databricks recommends a Unity Catalog service credential on serverless.
 - SQL has the function `read_kafka`. Lakeflow Connect has a Kafka connector (Beta) to ingest Kafka into a streaming table without writing Spark code.
 
 ### 12.9 Real-time mode
@@ -1562,7 +1562,7 @@ Free Edition has no account console, so this part is studied on a Databricks fre
 |---|---|
 | account console | manages workspaces, users and account-level budgets, at `https://accounts.cloud.databricks.com` |
 | workspace on AWS | a serverless workspace, or a classic workspace with automatic or manual configuration |
-| networking | VPC, subnet, security group, PrivateLink for classic compute |
+| networking | VPC (Virtual Private Cloud), subnet, security group, PrivateLink for classic compute |
 | Terraform provider `databricks/databricks` | builds workspaces and account-level resources with code |
 | budgets | alert when spending passes a threshold, do not block |
 | tags and serverless usage policy | attach each DBU to a team or a project |
@@ -1571,7 +1571,7 @@ Free Edition has no account console, so this part is studied on a Databricks fre
 
 ### 13.2 Why it is needed
 
-The real problem in Module 13 of the roadmap: on day 15 of the trial, the account has a card attached, so it converts to pay-as-you-go automatically, and the trial's cap of 50 DBU per hour no longer applies. On Friday afternoon you create a SQL warehouse in the UI without changing the size, point a SQL job that runs every 15 minutes at it, set a budget of 20 USD, and leave for the weekend.
+The real problem in Module 13 of the roadmap: on day 15 of the trial, the account has a card attached, so it converts to pay-as-you-go automatically, and the trial's cap of 50 DBU per hour no longer applies. On Friday afternoon you create a SQL warehouse in the UI without changing the size, point a SQL job that runs every 15 minutes at it, set a budget of 20 USD (United States dollar), and leave for the weekend.
 
 ```text
 2X-Small (4 DBU/giờ): Running 46.9 giờ, 187.7 DBU, 131.41 USD
@@ -1612,7 +1612,7 @@ X-Large (80 DBU/giờ): Running 46.9 giờ, 3754.7 DBU, 2628.27 USD
   - Network configuration: by default a Databricks-managed VPC; to manage it yourself, create a customer-managed VPC first.
 - Pitfall:
   - Changing `compute_mode` "requires recreation of the workspace".
-  - "Databricks trial credits apply only to Databricks usage." The VPC and the NAT gateway of a classic workspace are billed separately by AWS.
+  - "Databricks trial credits apply only to Databricks usage." The VPC and the NAT (network address translation) gateway of a classic workspace are billed separately by AWS.
   - "Classic compute (any compute that is not serverless) cannot interact with data assets in default storage."
 
 ### 13.5 Networking at an introductory level
@@ -1621,13 +1621,13 @@ X-Large (80 DBU/giờ): Running 46.9 giờ, 3754.7 DBU, 2628.27 USD
 - "You cannot move an existing workspace with a Databricks-managed VPC to use a customer-managed VPC."
 - PrivateLink for classic compute needs the Enterprise plan, a customer-managed VPC and secure cluster connectivity.
 - After the workspace is in the RUNNING state, the docs advise you to "wait an additional 20 minutes after the status shows RUNNING before creating or using clusters".
-- A serverless workspace does not need you to manage the network: egress is controlled by network policies, ingress by IP access lists.
+- A serverless workspace does not need you to manage the network: egress is controlled by network policies, ingress by IP (Internet Protocol) access lists.
 
 ### 13.6 Terraform
 
 - The latest version of the `databricks/databricks` provider is v1.142.0, dated 2026-11-09.
 - The docs split the work: Terraform for cloud-level resources and admin tasks such as creating workspaces and networking; Declarative Automation Bundles for jobs, pipelines and notebooks.
-- The account-level provider uses `host = "https://accounts.cloud.databricks.com"`; the workspace-level provider uses the workspace URL.
+- The account-level provider uses `host = "https://accounts.cloud.databricks.com"`; the workspace-level provider uses the workspace URL (Uniform Resource Locator).
 
 A serverless workspace with Terraform, verbatim from the docs:
 
@@ -1653,7 +1653,7 @@ resource "databricks_mws_workspaces" "serverless_workspace" {
 
 - A serverless usage policy (Public Preview) is a set of tags attached to all serverless activity of the people it is assigned to. The tags appear in the `custom_tags` column of `system.billing.usage`.
 - Pitfall: "Policy changes are only applied to usage initiated after the policy update." A policy does not tag classic compute. A pipeline called by a job does not inherit the job's policy.
-- Classic compute has the default tags `Vendor`, `ClusterId`, `ClusterName` and `Creator`, which are passed down to EC2 and EBS. Do not set a tag with the key `Name` on a cluster, because then the cluster "can no longer be tracked by Databricks" and may not auto terminate.
+- Classic compute has the default tags `Vendor`, `ClusterId`, `ClusterName` and `Creator`, which are passed down to EC2 (Amazon Elastic Compute Cloud) and EBS (Amazon Elastic Block Store). Do not set a tag with the key `Name` on a cluster, because then the cluster "can no longer be tracked by Databricks" and may not auto terminate.
 
 ### 13.9 Compute policy and auto termination
 
