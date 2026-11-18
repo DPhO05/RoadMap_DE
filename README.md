@@ -2,6 +2,8 @@
 
 Lộ trình tự học Data Engineer cho người đi từ Software Engineer. Nội dung viết bằng LaTeX, gồm 14 module, từ M0 đến M13. Các lab chạy code trong repo [lakehouse](https://github.com/DPhO05/lakehouse), nên clone repo đó trước khi làm M0.
 
+> **Thiết kế lakehouse Olist trên Databricks:** pipeline theo từng layer, tech stack và các khó khăn khi thiết kế nằm ở [databricks/README.md](databricks/README.md).
+
 ## Biên dịch
 
 Đã thử với [tectonic](https://tectonic-typesetting.github.io/) 0.17.0:
