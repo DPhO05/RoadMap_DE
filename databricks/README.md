@@ -139,6 +139,7 @@ Khó khăn riêng của bản tự dựng:
 - [lo_trinh_databricks.pdf](lo_trinh_databricks.pdf): lộ trình 14 module, có lab và số liệu của mục 5.
 - [giai_thich_thanh_phan.md](giai_thich_thanh_phan.md): giải thích từng thành phần Databricks. Bản tiếng Anh: [component_explainer_en.md](component_explainer_en.md).
 - [hoc_pyspark.pdf](hoc_pyspark.pdf): PySpark theo từng notebook.
+- [medallion_keywords.md](medallion_keywords.md): từ khoá tiếng Anh cần nhớ khi trình bày medallion và star schema, kèm cách đọc và câu mẫu.
 - [medallion_general_workflow.md](medallion_general_workflow.md): workflow medallion tổng quát, không gắn với bộ dữ liệu nào, kèm 12 câu hỏi phỏng vấn. Sơ đồ ở dưới, file gốc là [medallion_general_workflow.excalidraw](medallion_general_workflow.excalidraw).
 
 ![Workflow medallion tổng quát từ nguồn tới phục vụ](images/medallion_general_workflow.png)
