@@ -44,6 +44,14 @@ Olist REST API, mỗi bản ghi có cursor
 - Free Edition tạo sẵn catalog `workspace`. Mỗi layer là một schema: `bronze`, `silver`, `gold`.
 - Bước 1 chạy trên laptop. Từ bước 2, một Lakeflow Job chạy pipeline khi có file mới, rồi làm mới dashboard khi các task trước đều thành công.
 
+Sơ đồ dưới đây vẽ luồng này, cách chuyển DB nguồn sang star schema, và 3 bộ fact cùng dim ở Gold. File gốc để sửa là [olist_medallion_star_schema.excalidraw](olist_medallion_star_schema.excalidraw), mở bằng excalidraw.com.
+
+![Workflow medallion và star schema ở Gold của lakehouse Olist](images/olist_medallion_star_schema.png)
+
+Bản tiếng Anh ít chữ hơn, file gốc là [olist_medallion_star_schema_en.excalidraw](olist_medallion_star_schema_en.excalidraw).
+
+![Olist lakehouse on Databricks: medallion workflow and Gold star schema](images/olist_medallion_star_schema_en.png)
+
 ## 4. Thiết kế từng layer
 
 ### 4.1 Landing
@@ -131,3 +139,6 @@ Khó khăn riêng của bản tự dựng:
 - [lo_trinh_databricks.pdf](lo_trinh_databricks.pdf): lộ trình 14 module, có lab và số liệu của mục 5.
 - [giai_thich_thanh_phan.md](giai_thich_thanh_phan.md): giải thích từng thành phần Databricks. Bản tiếng Anh: [component_explainer_en.md](component_explainer_en.md).
 - [hoc_pyspark.pdf](hoc_pyspark.pdf): PySpark theo từng notebook.
+- [medallion_general_workflow.md](medallion_general_workflow.md): workflow medallion tổng quát, không gắn với bộ dữ liệu nào, kèm 12 câu hỏi phỏng vấn. Sơ đồ ở dưới, file gốc là [medallion_general_workflow.excalidraw](medallion_general_workflow.excalidraw).
+
+![Workflow medallion tổng quát từ nguồn tới phục vụ](images/medallion_general_workflow.png)
